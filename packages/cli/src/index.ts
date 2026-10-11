@@ -20,6 +20,12 @@ import { CpuProfile } from "./cpu-profile"
 
 ensurePluginRuntime()
 
+// MarsCLI: brand the client/server app name and enable the free-model subagent
+// pool without requiring an experimental toggle.
+process.env.MARSAI_CLI = "1"
+process.env.OPENCODE_CLIENT ??= "mars"
+process.env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS ??= "1"
+
 if (process.env.OPENCODE_SSH_ASKPASS_PORT) {
   const { askpass } = await import("./ssh-askpass")
   process.exit(await Effect.runPromise(askpass.pipe(Effect.provide(NodeServices.layer))))

@@ -5725,6 +5725,15 @@ export type ModelListInput = {
 
 export type ModelListOutput = { location: LocationPublicRef; data: Array<ModelInfo> }
 
+export type ModelProbeInput = {
+  readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]
+}
+
+export type ModelProbeOutput = {
+  location: LocationPublicRef
+  data: Array<{ providerID: string; modelID: string; ms: number; ok: boolean }>
+}
+
 export type ModelDefaultInput = {
   readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]
 }

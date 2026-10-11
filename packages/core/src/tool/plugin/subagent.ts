@@ -13,6 +13,7 @@ import { Session } from "../../session.js"
 import { SessionSchema } from "../../session/schema.js"
 import { SubagentCompletion } from "../../session/subagent-completion.js"
 import { SubagentJob } from "../../session/subagent-job.js"
+import { SubagentPool } from "../../session/subagent-pool.js"
 
 export const name = "subagent"
 
@@ -165,8 +166,7 @@ export const Plugin = {
                 return yield* new ToolFailure({
                   message: `Session ${existing.id} is not a child of the current session`,
                 })
-              const override = input.model === undefined ? undefined : yield* resolveModel(input.model)
-              // Continuing with a different agent switches the child, mirroring create semantics
+              const override = input.model === undefined ? undefined : yield* resolveModel(input.model)              // Continuing with a different agent switches the child, mirroring create semantics
               // where an explicit model wins over the agent's configured model, which wins over the inherited one.
               if (existing !== undefined) {
                 const switched = existing.agent !== agent.id
@@ -181,7 +181,13 @@ export const Plugin = {
                 )
               }
 
-              const model = override ?? agent.model ?? parent.model
+              // MarsCLI pool rotation: without an explicit model, subagents round-robin across
+              // free MarsAI models and are denied edit so they can only read and analyze.
+              const base = override ?? agent.model ?? parent.model
+              const picked =
+                override === undefined ? SubagentPool.next(SubagentPool.from(yield* models.available())) : undefined
+              const model =
+                picked === undefined ? base : Model.Ref.make({ providerID: picked.providerID, id: picked.id })
               const child =
                 existing ??
                 (yield* sessions
@@ -196,6 +202,13 @@ export const Plugin = {
                       (error) => new ToolFailure({ message: `Parent session not found: ${context.sessionID}`, error }),
                     ),
                   ))
+              if (picked !== undefined && existing === undefined)
+                yield* sessions
+                  .setPermissions({
+                    sessionID: child.id,
+                    permissions: [{ action: "edit", resource: "*", effect: "deny" }],
+                  })
+                  .pipe(Effect.orDie)
 
               const background = input.background === true
               yield* context.progress({ sessionID: child.id, status: "running" })

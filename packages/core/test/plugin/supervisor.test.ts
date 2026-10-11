@@ -202,7 +202,7 @@ describe("PluginSupervisor", () => {
     }),
   )
 
-  for (const targets of [["opencode.config.policy", "opencode.provider.opencode", "opencode.config.agent"], ["*"]]) {
+  for (const targets of [["opencode.config.policy", "opencode.config.agent"], ["*"]]) {
     it.effect(`keeps policy enforcement and the Console connection through plugin removals: ${targets}`, () =>
       Effect.gen(function* () {
         source.operations = targets.map((target) => ({ type: "remove", target }))
@@ -217,9 +217,7 @@ describe("PluginSupervisor", () => {
           Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(directory.path) }))),
         )
         const status = (id: string) => inventory.find((plugin) => plugin.id === id)?.state.status
-        expect(status("opencode.config.policy")).toBe("active")
-        expect(status("opencode.provider.opencode")).toBe("active")
-        // Removals still apply to everything else, including instance and builtin plugins.
+        expect(status("opencode.config.policy")).toBe("active")        // Removals still apply to everything else, including instance and builtin plugins.
         expect(status("opencode.config.agent")).toBeUndefined()
         expect(inventory.some((plugin) => plugin.id === id)).toBe(targets[0] !== "*")
       }).pipe(

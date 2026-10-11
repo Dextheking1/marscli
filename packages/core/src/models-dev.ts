@@ -428,7 +428,7 @@ export const layer = (options?: Options) =>
           )
       })
 
-      if (fetch && !process.argv.includes("--get-yargs-completions")) {
+      if (fetch && process.env.MARSAI_CLI !== "1" && !process.argv.includes("--get-yargs-completions")) {
         // Schedule.spaced runs the effect once, then waits between completions.
         yield* Effect.forkScoped(refresh().pipe(Effect.repeat(Schedule.spaced(ttl)), Effect.ignore))
       }

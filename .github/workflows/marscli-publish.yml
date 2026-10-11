@@ -1,0 +1,86 @@
+name: publish marscli
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact semver version to publish"
+        required: true
+        type: string
+      channel:
+        description: "npm dist-tag"
+        required: true
+        default: latest
+        type: string
+      models_url:
+        description: "Approved model catalog base URL (optional)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marscli-publish-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  MARSAI_VERSION: ${{ inputs.version }}
+  MARSAI_CHANNEL: ${{ inputs.channel }}
+  MARSAI_MODELS_URL: ${{ inputs.models_url }}
+  MARSAI_REPOSITORY_URL: ${{ vars.MARSAI_REPOSITORY_URL }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Set up Node and npm registry
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck CLI
+        run: cd packages/cli && bun run typecheck
+
+      - name: Build all native packages
+        run: cd packages/cli && bun run build
+
+      - name: Publish native packages and launcher
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: cd packages/cli && bun run publish:release
+
+      - name: Wait for launcher registry processing
+        run: |
+          for attempt in {1..20}; do
+            if npm view @mars_ai/marscli@"${MARSAI_VERSION}" version --silent >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 20 ]; then
+              echo "Launcher was accepted but is not registry-visible after 10 minutes"
+              exit 1
+            fi
+            sleep 30
+          done
+
+      - name: Verify published package metadata
+        run: |
+          npm view @mars_ai/marscli@"${MARSAI_VERSION}" bin optionalDependencies --json
+          npm view @mars_ai/marscli@"${MARSAI_VERSION}" dist-tags --json
+          npm view @mars_ai/marscli-windows-x64@"${MARSAI_VERSION}" os cpu bin --json
+          npm view @mars_ai/marscli-windows-x64-baseline@"${MARSAI_VERSION}" os cpu bin --json

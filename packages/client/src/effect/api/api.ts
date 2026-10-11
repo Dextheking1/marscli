@@ -1385,12 +1385,25 @@ export type ModelListInput = { readonly location?: { readonly directory?: string
 export type ModelListOutput = { readonly location: Location.PublicRef; readonly data: ReadonlyArray<Model.Info> }
 export type ModelListOperation<E = never> = (input?: ModelListInput) => Effect.Effect<ModelListOutput, E>
 
+export type ModelProbeInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
+export type ModelProbeOutput = {
+  readonly location: Location.PublicRef
+  readonly data: ReadonlyArray<{
+    readonly providerID: string
+    readonly modelID: string
+    readonly ms: number
+    readonly ok: boolean
+  }>
+}
+export type ModelProbeOperation<E = never> = (input?: ModelProbeInput) => Effect.Effect<ModelProbeOutput, E>
+
 export type ModelDefaultInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
 export type ModelDefaultOutput = { readonly location: Location.PublicRef; readonly data: Model.Info | undefined }
 export type ModelDefaultOperation<E = never> = (input?: ModelDefaultInput) => Effect.Effect<ModelDefaultOutput, E>
 
 export interface ModelApi<E = never> {
   readonly list: ModelListOperation<E>
+  readonly probe: ModelProbeOperation<E>
   readonly default: ModelDefaultOperation<E>
 }
 

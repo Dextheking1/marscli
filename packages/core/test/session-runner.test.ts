@@ -4723,7 +4723,7 @@ describe("SessionRunnerLLM", () => {
       "User-Agent": App.useragent(App.make()),
       "x-opencode-project": Project.ID.global,
       "x-opencode-session": sessionID,
-      "x-opencode-client": "opencode",
+      "x-opencode-client": "marsai",
     })
   })
 

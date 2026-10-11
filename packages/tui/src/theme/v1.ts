@@ -15,6 +15,7 @@ import gruvbox from "./assets/gruvbox.json" with { type: "json" }
 import kanagawa from "./assets/kanagawa.json" with { type: "json" }
 import lucentOrng from "./assets/lucent-orng.json" with { type: "json" }
 import material from "./assets/material.json" with { type: "json" }
+import marscli from "./assets/marscli.json" with { type: "json" }
 import matrix from "./assets/matrix.json" with { type: "json" }
 import mercury from "./assets/mercury.json" with { type: "json" }
 import monokai from "./assets/monokai.json" with { type: "json" }
@@ -48,6 +49,7 @@ export const DEFAULT_THEMES: Record<string, ThemeV1Json> = {
   github,
   gruvbox,
   kanagawa,
+  marscli,
   material,
   matrix,
   mercury,

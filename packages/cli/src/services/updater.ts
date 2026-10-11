@@ -5,6 +5,7 @@ import { OPENCODE_ARTIFACT, OPENCODE_CHANNEL, OPENCODE_LOCAL, OPENCODE_VERSION }
 import { Context, Duration, Effect, FileSystem, Layer, Option, Ref, Schema } from "effect"
 import { ChildProcess } from "effect/process"
 import { parse, type ParseError } from "jsonc-parser"
+import { readdir, rename, rm } from "node:fs/promises"
 import path from "node:path"
 import { stripVTControlCharacters } from "node:util"
 import { RetainedImage } from "./retained-image"
@@ -46,7 +47,7 @@ const decodeVpPackages = Schema.decodeUnknownOption(
 )
 
 const installNames: Record<Method, string> = {
-  curl: "The OpenCode installer",
+  curl: "The Mars CLI installer",
   npm: "npm",
   pnpm: "pnpm",
   bun: "Bun",
@@ -138,7 +139,7 @@ const make = Effect.gen(function* () {
       .readFileString(path.join(directory, "package.json"))
       .pipe(Effect.flatMap((text) => Effect.try(() => JSON.parse(text))))
     // Source invocations run inside Bun or Node, which may themselves be npm packages.
-    if (!/^@opencode(?:-ai)?\/cli(?:-node)?$/.test(manifest.name)) return
+    if (!/^@(?:opencode(?:-ai)?\/cli(?:-node)?|mars_ai\/marscli)$/.test(manifest.name)) return
     if (Object.values(manifest.bin ?? {}).some((bin) => path.resolve(directory, bin) === executable))
       return manifest.name
   }).pipe(Effect.orElseSucceed(() => undefined))
@@ -154,7 +155,7 @@ const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => undefined),
       ),
     )
-    return values.findLast((value) => value !== undefined) ?? "notify"
+    return values.findLast((value) => value !== undefined) ?? "auto"
   })
 
   const exec = Effect.fnUntraced(function* (command: string[], timeout: Duration.Input = "10 seconds") {
@@ -190,8 +191,8 @@ const make = Effect.gen(function* () {
     return yield* Effect.fail(
       new UpgradeError({
         title: "Git Bash is required to update OpenCode",
-        detail: "The OpenCode installer runs with Git Bash on Windows, and it was not found.",
-        retry: "Install Git for Windows or set OPENCODE_GIT_BASH_PATH, then run opencode upgrade again.",
+        detail: "The Mars CLI installer runs with Git Bash on Windows, and it was not found.",
+        retry: "Install Git for Windows or set OPENCODE_GIT_BASH_PATH, then run mars upgrade again.",
       }),
     )
   })
@@ -257,7 +258,7 @@ const make = Effect.gen(function* () {
         fetch(
           core
             ? "https://formulae.brew.sh/api/formula/opencode.json"
-            : `https://opencode.ai/update/api/${encodeURIComponent(channel)}/${encodeURIComponent(OPENCODE_ARTIFACT)}/${distribution}?current=${encodeURIComponent(OPENCODE_VERSION)}`,
+            : `${process.env.MARSAI_UPDATE_URL ?? "https://opencode.ai/update/api"}/${encodeURIComponent(channel)}/${encodeURIComponent(OPENCODE_ARTIFACT)}/${distribution}?current=${encodeURIComponent(OPENCODE_VERSION)}`,
           {
             signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
           },
@@ -265,9 +266,9 @@ const make = Effect.gen(function* () {
       catch: (cause) =>
         new UpgradeError(
           {
-            title: "Could not check for OpenCode updates",
+            title: "Could not check for Mars CLI updates",
             detail: errorDetail(cause),
-            retry: "Check your network, then run opencode upgrade again.",
+            retry: "Check your network, then run mars upgrade again.",
           },
           { cause },
         ),
@@ -343,7 +344,7 @@ const make = Effect.gen(function* () {
           title: input.title ?? `${installNames[input.method]} could not install OpenCode`,
           detail,
           command: (input.displayCommand ?? input.command).join(" "),
-          retry: input.retry ?? "Fix the issue above, then run opencode upgrade again.",
+          retry: input.retry ?? "Fix the issue above, then run mars upgrade again.",
         },
         cause === undefined ? undefined : { cause },
       )
@@ -363,6 +364,29 @@ const make = Effect.gen(function* () {
       ),
     )
   }
+
+  // ponytail: Windows-only park of the running image; a same-volume staging swap would
+  // also cover POSIX atomicity, add if a package manager ever locks files there.
+  // Windows locks the image file of a running process, so a self-update cannot replace the
+  // CLI binary while it (or the background service, which runs the same file) is live.
+  // Renaming a running executable is allowed, though: park it aside so the package manager
+  // can lay down fresh files, then sweep stale parked copies (best effort).
+  const parkRunningExecutable = Effect.fnUntraced(function* () {
+    if (process.platform !== "win32") return
+    const executable = process.execPath
+    const parked = `${executable}.old-${process.pid}`
+    yield* Effect.promise(() => rename(executable, parked).catch(() => {}))
+    const prefix = `${path.basename(executable)}.old-`
+    yield* Effect.promise(() =>
+      readdir(path.dirname(executable))
+        .then((names) =>
+          Promise.all(names.filter((name) => name.startsWith(prefix) && name !== path.basename(parked)).map((name) =>
+            rm(path.join(path.dirname(executable), name), { force: true }).catch(() => {}),
+          )),
+        )
+        .catch(() => {}),
+    )
+  })
 
   const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {
     if (!parseReleaseVersion(input)) return yield* Effect.fail(new Error(`Invalid version: ${input}`))
@@ -419,8 +443,8 @@ const make = Effect.gen(function* () {
             method,
             command: ["curl", "-fsSL", "-o", installer, "https://opencode.ai/v2/install"],
             displayCommand: ["curl", "-fsSL", "https://opencode.ai/v2/install"],
-            title: "Could not download the OpenCode installer",
-            retry: "Check your network, then run opencode upgrade again.",
+            title: "Could not download the Mars CLI installer",
+            retry: "Check your network, then run mars upgrade again.",
           })
           return yield* retaining(
             method,
@@ -433,6 +457,7 @@ const make = Effect.gen(function* () {
           )
         }
         if (method === "brew") return yield* runUpgrade({ method, command: ["brew", "upgrade", packageName] })
+        yield* parkRunningExecutable()
         return yield* retaining(method, runUpgrade({ method, command: commands[method] }))
       }),
     ).pipe(
@@ -441,9 +466,9 @@ const make = Effect.gen(function* () {
           ? cause
           : new UpgradeError(
               {
-                title: "Could not prepare the OpenCode upgrade",
+                title: "Could not prepare the Mars CLI upgrade",
                 detail: errorDetail(cause),
-                retry: "Fix the issue above, then run opencode upgrade again.",
+                retry: "Fix the issue above, then run mars upgrade again.",
               },
               { cause },
             ),
@@ -491,7 +516,7 @@ const make = Effect.gen(function* () {
     const current = yield* Ref.get(installedVersion)
     yield* upgrade(detected, version)
     yield* Ref.set(installedVersion, version)
-    yield* Effect.logInfo("updated OpenCode", { from: current, to: version, method: detected })
+    yield* Effect.logInfo("updated Mars CLI", { from: current, to: version, method: detected })
     return true
   })
 

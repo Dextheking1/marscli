@@ -101,14 +101,16 @@ test("waits for a live contender when another native contender fails", async () 
   expect(endpoint.url).toBe(info.url)
 })
 
-test("reports a failed registered service", async () => {
+test("replaces a failed registered service and surfaces the replacement error without a command", async () => {
   await using fixture = await serviceFixture()
   const registration = fixture.registration
   fixture.spawn("failed-owner")
   await fixture.waitForFile()
 
+  // The broken owner is replaced; with no replacement command available the ensure loop
+  // surfaces that instead of the owner's startup failure.
   await expect(ensure({ file: registration, version: "test", command: [] })).rejects.toThrow(
-    "Background service failed to start",
+    "Missing service command",
   )
 })
 

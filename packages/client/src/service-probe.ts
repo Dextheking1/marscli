@@ -27,7 +27,10 @@ export function decide(service: LocalService, options: DiscoverOptions) {
       "Background service uses an incompatible health protocol. Update this client or explicitly restart the service.",
     )
   if (service.state === "ready") return { _tag: "reuse" } as const
-  if (service.state === "failed") return fail("Background service failed to start")
+  // A registered but unhealthy owner is replaced instead of failing hard: one-time crashes
+  // (a transient migration error, a bad port race) heal themselves on the fresh spawn. A
+  // persistently broken service still fails at the ensure deadline with the startup error.
+  if (service.state === "failed") return { _tag: "replace", pty: "clear" } as const
   return { _tag: "wait" } as const
 }
 

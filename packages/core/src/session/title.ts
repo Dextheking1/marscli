@@ -102,6 +102,24 @@ export const layer = Layer.effect(
       if (!session) return
       const firstUser = yield* SessionHistory.firstUserMessage(db, session.id)
       if (!firstUser) return
+      // MarsAI serializes paid account billing. The background title request would race the
+      // user's first inference and spend extra tokens, so derive the title from the prompt.
+      if (process.env.MARSAI_CLI === "1") {
+        if (isUntitled(session)) {
+          const localTitle = firstUser.text.trim().replace(/\s+/g, " ")
+          if (localTitle) {
+            const expectedSequence = (yield* Bus.latestSequence(db, sessionID)) + 1
+            yield* bus
+              .publish(
+                SessionEvent.Renamed,
+                { sessionID: session.id, title: truncate(localTitle) },
+                { commit: (sequence) => (sequence === expectedSequence ? Effect.void : Effect.die(titleChanged)) },
+              )
+              .pipe(Effect.catchDefect((defect) => (defect === titleChanged ? Effect.void : Effect.die(defect))))
+          }
+        }
+        return
+      }
       const text = !isUntitled(session)
         ? yield* store.context(session.id).pipe(
             Effect.map((messages) => {

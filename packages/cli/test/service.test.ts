@@ -18,11 +18,11 @@ import { testEffect } from "../../core/test/lib/effect"
 const it = testEffect(NodeFileSystem.layer)
 
 test("managed service ports are stable per installation channel", () => {
-  expect(ServiceConfig.defaultPort("latest")).toBe(0xc0de)
-  expect(ServiceConfig.defaultPort("dev")).toBe(0xc0de)
-  expect(ServiceConfig.defaultPort("beta")).toBe(0xc0de)
-  expect(ServiceConfig.defaultPort("next")).toBe(0xc0de)
-  expect(ServiceConfig.defaultPort("local")).toBe(0xc0df)
+  expect(ServiceConfig.defaultPort("latest")).toBe(0xc0de + 100)
+  expect(ServiceConfig.defaultPort("dev")).toBe(0xc0de + 100)
+  expect(ServiceConfig.defaultPort("beta")).toBe(0xc0de + 100)
+  expect(ServiceConfig.defaultPort("next")).toBe(0xc0de + 100)
+  expect(ServiceConfig.defaultPort("local")).toBe(0xc0df + 100)
   expect(ServiceConfig.defaultPort("preview-a")).toBe(ServiceConfig.defaultPort("preview-a"))
   expect(ServiceConfig.defaultPort("preview-a")).not.toBe(ServiceConfig.defaultPort("preview-b"))
 })

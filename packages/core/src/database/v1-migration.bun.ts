@@ -702,7 +702,8 @@ export function run(options: Options = {}): Effect.Effect<RunResult, never, Data
 function nextPath(options: Options, data: string) {
   if (options.nextDatabasePath) return options.nextDatabasePath
   if (process.env.OPENCODE_DB === ":memory:") return undefined
-  return path.join(data, "opencode-next.db")
+  // MarsCLI v1 databases used the marsai prefix (channel DBs included).
+  return path.join(data, "marsai-next.db")
 }
 
 function openNextDatabase(sourcePath: string) {

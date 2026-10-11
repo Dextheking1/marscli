@@ -23,6 +23,31 @@ export const ModelGroup = HttpApiGroup.make("server.model")
       ),
   )
   .add(
+    HttpApiEndpoint.get("model.probe", "/api/model/probe", {
+      query: LocationQuery,
+      success: Location.response(
+        Schema.Array(
+          Schema.Struct({
+            providerID: Schema.String,
+            modelID: Schema.String,
+            ms: Schema.Int,
+            ok: Schema.Boolean,
+          }),
+        ),
+      ),
+      error: ServiceUnavailableError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "model.probe",
+          summary: "Probe model latency",
+          description:
+            "Time a minimal generation against each available model and return the measured latency per model.",
+        }),
+      ),
+  )
+  .add(
     HttpApiEndpoint.get("model.default", "/api/model/default", {
       query: LocationQuery,
       success: Location.response(Schema.UndefinedOr(Model.Info)),

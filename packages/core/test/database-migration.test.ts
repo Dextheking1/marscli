@@ -12,6 +12,7 @@ import { DatabaseMigration } from "@opencode/core/database/migration"
 import { migrations } from "@opencode/core/database/migration.gen"
 import workspaceNameMigration from "@opencode/core/database/migration/20260410174513_workspace-name"
 import { Database } from "@opencode/core/database/database"
+import { Secret } from "@opencode/core/util/secret"
 import { tmpdir } from "./fixture/tmpdir"
 import legacyCredentialsMigration from "@opencode/core/database/migration/20260805200742_import_legacy_credentials"
 import worktreeMigration from "@opencode/core/database/migration/20260812213948_worktree"
@@ -459,53 +460,62 @@ describe("DatabaseMigration", () => {
         yield* DatabaseMigration.applyOnly(db, [legacyCredentialsMigration])
         yield* DatabaseMigration.applyOnly(db, [legacyCredentialsMigration])
 
-        expect(yield* db.all(sql`SELECT integration_id, label, value FROM credential ORDER BY integration_id`)).toEqual(
-          [
-            {
-              integration_id: "anthropic",
-              label: "Existing",
-              value: JSON.stringify({ type: "key", key: "current-key" }),
+        // Imported credentials are encrypted at rest (JSON-encoded enc:v1: strings); the
+        // pre-existing "anthropic" row predates the migration and stays as written.
+        const imported = (value: unknown) =>
+          JSON.parse(Secret.decrypt(typeof value === "string" ? (JSON.parse(value) as string) : (value as string)))
+        const rows = (yield* db.all<{ integration_id: string; label: string; value: unknown }>(
+          sql`SELECT integration_id, label, value FROM credential ORDER BY integration_id`,
+        )).map((row) => ({
+          integration_id: row.integration_id,
+          label: row.label,
+          value: row.integration_id === "anthropic" ? row.value : imported(row.value),
+        }))
+        expect(rows).toEqual([
+          {
+            integration_id: "anthropic",
+            label: "Existing",
+            value: JSON.stringify({ type: "key", key: "current-key" }),
+          },
+          {
+            integration_id: "custom-provider",
+            label: "API key",
+            value: { type: "key", key: "custom-key" },
+          },
+          {
+            integration_id: "github-copilot",
+            label: "OAuth",
+            value: {
+              type: "oauth",
+              methodID: "device",
+              refresh: "refresh",
+              access: "access",
+              expires: 123,
             },
-            {
-              integration_id: "custom-provider",
-              label: "API key",
-              value: JSON.stringify({ type: "key", key: "custom-key" }),
+          },
+          {
+            integration_id: "google",
+            label: "API key",
+            value: { type: "key", key: "google-key", metadata: { region: "us" } },
+          },
+          {
+            integration_id: "https://example.com",
+            label: "API key",
+            value: { type: "key", key: "wellknown-key" },
+          },
+          {
+            integration_id: "openai",
+            label: "OAuth",
+            value: {
+              type: "oauth",
+              methodID: "chatgpt-browser",
+              refresh: "refresh",
+              access: "access",
+              expires: 123,
+              metadata: { accountID: "account" },
             },
-            {
-              integration_id: "github-copilot",
-              label: "OAuth",
-              value: JSON.stringify({
-                type: "oauth",
-                methodID: "device",
-                refresh: "refresh",
-                access: "access",
-                expires: 123,
-              }),
-            },
-            {
-              integration_id: "google",
-              label: "API key",
-              value: JSON.stringify({ type: "key", key: "google-key", metadata: { region: "us" } }),
-            },
-            {
-              integration_id: "https://example.com",
-              label: "API key",
-              value: JSON.stringify({ type: "key", key: "wellknown-key" }),
-            },
-            {
-              integration_id: "openai",
-              label: "OAuth",
-              value: JSON.stringify({
-                type: "oauth",
-                methodID: "chatgpt-browser",
-                refresh: "refresh",
-                access: "access",
-                expires: 123,
-                metadata: { accountID: "account" },
-              }),
-            },
-          ],
-        )
+          },
+        ])
         expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'wellknown:sources'`)).toEqual({
           value: JSON.stringify(["https://example.com"]),
         })

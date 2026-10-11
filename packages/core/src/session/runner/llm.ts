@@ -21,6 +21,8 @@ import { SessionStore } from "../store.js"
 import { SessionMessageTable } from "../sql.js"
 import { SessionTitle } from "../title.js"
 import { toSessionError } from "../to-session-error.js"
+import { Model } from "../../model.js"
+import { SubagentPool } from "../subagent-pool.js"
 import { DrainResult, Service, type Interface } from "./index.js"
 import { Snapshot } from "../../snapshot.js"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
@@ -48,6 +50,7 @@ const layer = Layer.effect(
     const plugins = yield* Plugin.Service
     const title = yield* SessionTitle.Service
     const steps = yield* SessionStep.make
+    const models = yield* Model.Service
     // Title generation starts once input is visible and must not delay model execution.
     const titles = yield* FiberMap.make<SessionSchema.ID, void, never>()
 
@@ -210,6 +213,7 @@ const layer = Layer.effect(
       let initial: SessionContext.Loaded | undefined = first
       let recoverOverflow = true
       let recoverContinuation = true
+      let rotationAttempt = 1
       while (true) {
         // Reuse boundary preparation once; retries refresh context without delivering more input.
         const loaded = initial ?? (yield* prepareContext(sessionID).pipe(Effect.flatMap(context.load)))
@@ -250,13 +254,32 @@ const layer = Layer.effect(
           model: loaded.model,
           prepared,
           retry: (cause, error, proposed) =>
-            retry.decide({
-              cause,
-              error,
-              agent: loaded.agent.id,
-              model: loaded.model.ref,
-              hook: prepared.retry,
-              retry: proposed,
+            Effect.gen(function* () {
+              // MarsCLI fail-fast: a pool model never waits out retries. Rotate to the next
+              // MarsAI candidate (pool first, then paid) and retry the step with the new model.
+              if (SubagentPool.isPoolModel(loaded.model.ref)) {
+                const candidate = SubagentPool.escalate(loaded.model.ref, yield* models.available())
+                if (candidate !== undefined) {
+                  yield* bus.publish(SessionEvent.ModelSelected, {
+                    sessionID,
+                    model: Model.Ref.make({ providerID: candidate.providerID, id: candidate.id }),
+                    previous: loaded.session.model,
+                  })
+                  assistantMessageID = SessionMessage.ID.create()
+                  // PositiveInt-valid attempt number; a pool model retries immediately with the rotated model.
+                  return { retry: true as const, attempt: rotationAttempt++, delay: 0 }
+                }
+                // Pool exhausted with no MarsAI fallback: waiting out retries cannot help.
+                return { retry: false as const }
+              }
+              return yield* retry.decide({
+                cause,
+                error,
+                agent: loaded.agent.id,
+                model: loaded.model.ref,
+                hook: prepared.retry,
+                retry: proposed,
+              })
             }),
           recoverContinuation,
           recoverOverflow: Effect.suspend(() =>
@@ -371,5 +394,6 @@ export const node = makeLocationNode({
     Snapshot.node,
     ToolOutput.node,
     Database.node,
+    Model.node,
   ],
 })

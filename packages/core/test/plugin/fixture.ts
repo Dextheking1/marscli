@@ -53,7 +53,10 @@ const npmLayer = Layer.succeed(
   }),
 )
 
-const generateLayer = Layer.succeed(Generate.Service, Generate.Service.of({ text: () => Effect.succeed("") }))
+const generateLayer = Layer.succeed(
+  Generate.Service,
+  Generate.Service.of({ text: () => Effect.succeed(""), probe: () => Effect.succeed([]) }),
+)
 
 const configLayer = Config.testLayer()
 

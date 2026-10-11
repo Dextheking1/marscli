@@ -105,6 +105,8 @@ import type {
   MessageListOutput,
   ModelListInput,
   ModelListOutput,
+  ModelProbeInput,
+  ModelProbeOutput,
   ModelDefaultInput,
   ModelDefaultOutput,
   GenerateTextInput,
@@ -1116,6 +1118,18 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/model`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401, 404, 503],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      probe: (input?: ModelProbeInput, requestOptions?: RequestOptions) =>
+        request<ModelProbeOutput>(
+          {
+            method: "GET",
+            path: `/api/model/probe`,
             query: { location: input?.["location"] },
             successStatus: 200,
             declaredStatuses: [400, 401, 404, 503],

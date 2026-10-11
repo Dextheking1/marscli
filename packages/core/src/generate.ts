@@ -2,7 +2,7 @@ export * as Generate from "./generate.js"
 
 import { LLM, LLMClient, AIError } from "@opencode/ai"
 import { SessionID } from "@opencode/schema/session-id"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { llmClient } from "./effect/app-node-platform.js"
 import { ModelResolver } from "./model-resolver.js"
@@ -11,6 +11,13 @@ import { Model } from "./model.js"
 export interface TextInput {
   readonly prompt: string
   readonly model?: Model.Ref
+}
+
+export interface ProbeResult {
+  readonly providerID: string
+  readonly modelID: string
+  readonly ms: number
+  readonly ok: boolean
 }
 
 export class ModelSelectionError extends Schema.TaggedError<ModelSelectionError>()("Generate.ModelSelectionError", {
@@ -26,6 +33,7 @@ export type Error = ModelSelectionError | UnavailableError
 
 export interface Interface {
   readonly text: (input: TextInput) => Effect.Effect<string, Error>
+  readonly probe: (models: ReadonlyArray<Model.Info>) => Effect.Effect<ReadonlyArray<ProbeResult>>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Generate") {}
@@ -93,7 +101,31 @@ export const layer = Layer.effect(
         ),
       )
 
-    return Service.of({ text })
+    // Time one minimal generation per model through the resolved credential. Best effort:
+    // a model that errors out still returns a result marked ok=false, so a dead provider
+    // never fails the whole probe.
+    const probe: Interface["probe"] = (models) =>
+      Effect.forEach(
+        models,
+        (model) =>
+          Effect.gen(function* () {
+            const start = yield* Clock.currentTimeMillis
+            const resolved = yield* resolver.resolveModel(model).pipe(Effect.orElseSucceed(() => undefined))
+            if (!resolved) return { providerID: model.providerID, modelID: model.id, ms: 0, ok: false }
+            const done = yield* llm
+              .generate(LLM.request({ model: resolved.model, prompt: "ok" }))
+              .pipe(Effect.option)
+            return {
+              providerID: model.providerID,
+              modelID: model.id,
+              ms: Math.max(0, (yield* Clock.currentTimeMillis) - start),
+              ok: Option.isSome(done),
+            }
+          }),
+        { concurrency: 5 },
+      )
+
+    return Service.of({ text, probe })
   }),
 )
 

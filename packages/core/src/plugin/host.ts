@@ -226,6 +226,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
     },
     model: {
       list: () => response(models.available()),
+      probe: () => models.available().pipe(Effect.flatMap((catalog) => response(generate.probe(catalog)))),
       default: () => response(models.default()),
       reload: models.reload,
       transform: (callback) =>

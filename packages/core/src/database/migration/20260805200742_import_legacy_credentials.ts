@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises"
+import { readFile, rename } from "node:fs/promises"
 import path from "node:path"
 import { sql } from "drizzle-orm"
 import { Effect, Option, Schema } from "effect"
@@ -6,6 +6,7 @@ import { Credential } from "@opencode/schema/credential"
 import { Integration } from "@opencode/schema/integration"
 import { NonNegativeInt } from "@opencode/schema/schema"
 import { Global } from "@opencode/util/global"
+import { Secret } from "../../util/secret.js"
 import type { DatabaseMigration } from "../migration.js"
 
 const LegacyOAuth = Schema.Struct({
@@ -36,7 +37,10 @@ const migration: DatabaseMigration.Migration = {
   up(tx) {
     return Effect.gen(function* () {
       const global = yield* Global.Service
-      return yield* importLegacyCredentials(tx, path.join(global.data, "auth.json"))
+      // Best-effort import: any unexpected failure must not abort the migration and brick startup.
+      return yield* importLegacyCredentials(tx, path.join(global.data, "auth.json")).pipe(
+        Effect.catchCause((cause) => Effect.logWarning("legacy credential import failed; continuing", { cause })),
+      )
     })
   },
 }
@@ -47,16 +51,29 @@ export function importLegacyCredentials(tx: Parameters<DatabaseMigration.Migrati
   return Effect.gen(function* () {
     const content = yield* Effect.promise(() => readFile(filepath, "utf8").catch(() => undefined))
     if (content === undefined) return
-    const input = Option.getOrUndefined(decodeJson(content))
+    // A broken legacy credential file must never brick startup: park it aside and skip the import.
+    const park = Effect.gen(function* () {
+      yield* Effect.logWarning("legacy credential file is invalid; skipping import", { filepath })
+      yield* Effect.promise(() => rename(filepath, `${filepath}.import-failed`).catch(() => {}))
+    })
+    // MarsCLI v1 encrypted the whole auth.json (enc:v1: prefix) instead of individual values.
+    const plain =
+      content.trimStart().startsWith("enc:v1:")
+        ? yield* Effect.try(() => Secret.decrypt(content.trim())).pipe(Effect.catchCause(() => park.pipe(Effect.as(undefined))))
+        : content
+    if (plain === undefined) return
+    const input = Option.getOrUndefined(decodeJson(plain))
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
-      return yield* Effect.fail(new Error("Legacy credential file must contain an object"))
+      return yield* park
     }
 
     const origins: string[] = []
     for (const [id, raw] of Object.entries(input)) {
       const value = Option.getOrUndefined(decodeValue(raw))
       if (!value) continue
-      const integrationID = id.replace(/\/+$/, "")
+      // MarsCLI v1 stored the MarsAI grant under "opencode" (or legacy "marsai"); both map to the MarsAI integration.
+      const legacy = id.replace(/\/+$/, "")
+      const integrationID = legacy === "opencode" || legacy === "marsai" ? "marsai" : legacy
       if (!integrationID) continue
       if (value.type === "wellknown") origins.push(integrationID)
       if (yield* tx.get(sql`SELECT id FROM credential WHERE integration_id = ${integrationID}`)) continue
@@ -82,9 +99,12 @@ export function importLegacyCredentials(tx: Parameters<DatabaseMigration.Migrati
               })
       const label = credential.type === "oauth" ? "OAuth" : "API key"
       const now = Date.now()
+      // Raw SQL bypasses drizzle's json-mode serializer, so apply it explicitly: the column
+      // stores a JSON-encoded string, which the read path decrypts when prefixed enc:v1:.
+      const stored = JSON.stringify(Secret.encrypt(JSON.stringify(credential)))
       yield* tx.run(sql`
         INSERT INTO credential (id, integration_id, label, value, time_created, time_updated)
-        VALUES (${Credential.ID.create()}, ${integrationID}, ${label}, ${JSON.stringify(credential)}, ${now}, ${now})
+        VALUES (${Credential.ID.create()}, ${integrationID}, ${label}, ${stored}, ${now}, ${now})
       `)
     }
 
@@ -104,6 +124,6 @@ export function importLegacyCredentials(tx: Parameters<DatabaseMigration.Migrati
 
 function methodID(integrationID: string) {
   if (integrationID === "openai") return "chatgpt-browser"
-  if (["github-copilot", "opencode", "xai"].includes(integrationID)) return "device"
+  if (["github-copilot", "opencode", "marsai", "xai"].includes(integrationID)) return "device"
   return "oauth"
 }

@@ -1,79 +1,60 @@
 import { RGBA, TextAttributes } from "@opentui/core"
-import { For, type JSX } from "solid-js"
+import { For, Show, type JSX } from "solid-js"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useTheme } from "../context/theme"
-import { tint } from "../theme/color"
-import { go, logo } from "../logo"
+import { logo } from "../logo"
+
+// Vertical gradient over the wordmark rows: light orange → deep red.
+const gradient = ["#fdba74", "#fb923c", "#f97316", "#ea580c", "#dc2626"]
 
 export function Logo() {
   const theme = useTheme()
   const dimensions = useTerminalDimensions()
 
-  const renderLine = (line: string, fg: RGBA, bold: boolean): JSX.Element[] => {
-    const shadow = tint(theme.background.base, fg, 0.25)
+  const renderLine = (line: string, fg: RGBA, bold = true): JSX.Element[] => {
     const attrs = bold ? TextAttributes.BOLD : undefined
-    return Array.from(line).map((char) => {
-      if (char === "_") {
-        return (
-          <text fg={fg} bg={shadow} attributes={attrs} selectable={false}>
-            {" "}
-          </text>
-        )
-      }
-      if (char === "^") {
-        return (
-          <text fg={fg} bg={shadow} attributes={attrs} selectable={false}>
-            ▀
-          </text>
-        )
-      }
-      if (char === "~") {
-        return (
-          <text fg={shadow} attributes={attrs} selectable={false}>
-            ▀
-          </text>
-        )
-      }
-      if (char === ",") {
-        return (
-          <text fg={shadow} attributes={attrs} selectable={false}>
-            ▄
-          </text>
-        )
-      }
-      return (
-        <text fg={fg} attributes={attrs} selectable={false}>
-          {char}
-        </text>
-      )
-    })
+    return Array.from(line).map((char) => (
+      <text fg={fg} attributes={attrs} selectable={false}>
+        {char}
+      </text>
+    ))
   }
 
+  // Wordmark + rule + badge is ~44 columns; below that fall back to plain rows.
+  const compact = () => dimensions().width < 46
+
   return (
-    <box>
-      {dimensions().height < 12 ? null : dimensions().width < 22 ? (
-        <For each={go.right.slice(1)}>
-          {(line) => <box flexDirection="row">{renderLine(line, theme.text.base, true)}</box>}
-        </For>
-      ) : dimensions().width < 44 ? (
-        <>
-          <For each={logo.left.slice(1)}>
-            {(line) => <box flexDirection="row">{renderLine(line, theme.text.muted, false)}</box>}
+    <Show
+      when={!compact()}
+      fallback={
+        <box flexDirection="column" alignItems="center">
+          <For each={logo.mars}>{(line) => <box flexDirection="row">{renderLine(line, RGBA.fromHex(gradient[2]))}</box>}</For>
+        </box>
+      }
+    >
+      <box flexDirection="row" gap={2} alignItems="center">
+        <box flexDirection="column">
+          <For each={logo.mars}>
+            {(line, index) => (
+              <box flexDirection="row">{renderLine(line, RGBA.fromHex(gradient[index()] ?? gradient[2]))}</box>
+            )}
           </For>
-          <For each={logo.right}>
-            {(line) => <box flexDirection="row">{renderLine(line, theme.text.base, true)}</box>}
-          </For>
-        </>
-      ) : (
-        <For each={logo.left}>
-          {(line, index) => (
-            <box flexDirection="row" gap={1}>
-              <box flexDirection="row">{renderLine(line, theme.text.muted, false)}</box>
-              <box flexDirection="row">{renderLine(logo.right[index()], theme.text.base, true)}</box>
-            </box>
-          )}
-        </For>
-      )}
-    </box>
+        </box>
+        <box flexDirection="column" alignSelf="stretch">
+          <For each={logo.mars}>{() => <text fg={theme.border.base}>│</text>}</For>
+        </box>
+        <box flexDirection="column" justifyContent="center">
+          <text fg={theme.text.muted} attributes={TextAttributes.BOLD} selectable={false}>
+            {logo.cli[0]}
+          </text>
+          <text fg={RGBA.fromHex("#ef4444")} selectable={false}>
+            {logo.cli[1]}
+          </text>
+          <text fg={RGBA.fromHex(gradient[2])} attributes={TextAttributes.BOLD} selectable={false}>
+            {logo.cli[2]}
+          </text>
+        </box>
+      </box>
+    </Show>
   )
 }

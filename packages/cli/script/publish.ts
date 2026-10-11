@@ -1,173 +1,155 @@
 #!/usr/bin/env bun
 import { $ } from "bun"
+import { rm } from "fs/promises"
+import { join } from "path"
 import pkg from "../package.json"
 import { Script } from "@opencode/script"
 import { fileURLToPath } from "url"
-import { existsSync } from "fs"
-import { chmod, rm, utimes } from "node:fs/promises"
-import path from "node:path"
-import { UpdateArtifact } from "../../../script/update-artifact"
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
-const root = path.resolve(process.env.OPENCODE_CLI_DIST ?? path.join(dir, "dist"))
 process.chdir(dir)
-const dryRun = process.argv.includes("--dry-run")
+const dryRun = process.env.MARSAI_PUBLISH_DRY_RUN === "1" || process.argv.includes("--dry-run")
+const only = process.env.MARSAI_PUBLISH_ONLY
+const root = process.env.OPENCODE_CLI_DIST ?? "./dist"
+const launcherDir = join(root, "marscli")
 
 async function published(name: string, version: string) {
-  return (await $`npm view ${name}@${version} version`.nothrow()).exitCode === 0
+  return (await $`npm view ${name}@${version} version --silent`.quiet().nothrow()).exitCode === 0
 }
 
 async function publish(dir: string, name: string, version: string) {
   if (process.platform !== "win32") await $`chmod -R 755 .`.cwd(dir)
-  const exists = !dryRun && (await published(name, version))
-  if (exists) console.log(`already published ${name}@${version}`)
-  // Keep local tarballs available to downstream publishers when retrying a release.
+  for (const archive of new Bun.Glob("*.tgz").scanSync({ cwd: dir })) {
+    await rm(join(dir, archive), { force: true })
+  }
   await $`bun pm pack`.cwd(dir)
-  if (!exists && !dryRun) await $`npm publish *.tgz --access public --tag ${Script.channel}`.cwd(dir)
-}
-
-async function publishDistribution(input: {
-  root: string
-  name: string
-  command: string
-  legacyCommand?: string
-  binary: string
-  packagePrefix: string
-  artifact: string
-}) {
-  const binaries: Record<string, string> = {}
-  for (const filepath of new Bun.Glob("*/package.json").scanSync({ cwd: input.root })) {
-    const item = await Bun.file(`${input.root}/${filepath}`).json()
-    if (!item.name.startsWith(input.packagePrefix)) continue
-    binaries[item.name] = item.version
+  const archives = [...new Bun.Glob("*.tgz").scanSync({ cwd: dir })]
+  if (archives.length !== 1) throw new Error(`Expected one tarball for ${name}, found ${archives.length}`)
+  if (dryRun) return console.log(`packed ${name}@${version}`)
+  if (await published(name, version)) return console.log(`already published ${name}@${version}`)
+  const result = await $`npm publish ${archives[0]} --access public --tag ${Script.channel}`.cwd(dir).nothrow()
+  if (result.exitCode === 0) return
+  const output = `${result.stdout.toString()}\n${result.stderr.toString()}`
+  if (output.includes("EOTP") || output.includes("E_STAGE_REQUIRED")) {
+    throw new Error(`npm authorization cannot publish ${name}; use a direct-capable token or publish-time OTP`)
   }
-  console.log(input.name, "binaries", binaries)
-  const versions = new Set(Object.values(binaries))
-  if (versions.size > 1) throw new Error(`Binary package versions do not match for ${input.name}`)
-  const version = versions.values().next().value
-  if (!version) throw new Error(`No binary packages found for ${input.name}`)
-  if (version !== Script.version) throw new Error(`Expected ${Script.version}, got ${version} for ${input.name}`)
-
-  await $`mkdir -p ${input.root}/${input.name}/bin`
-  await $`cp ./script/postinstall.mjs ${input.root}/${input.name}/postinstall.mjs`
-  await Bun.file(`${input.root}/${input.name}/bin/${input.command}.exe`).write(
-    [
-      `echo "Error: ${input.name}'s postinstall script was not run." >&2`,
-      'echo "" >&2',
-      'echo "This occurs when installation scripts are disabled." >&2',
-      'echo "Run the package postinstall script or reinstall with scripts enabled." >&2',
-      "exit 1",
-      "",
-    ].join("\n"),
-  )
-  await Bun.file(`${input.root}/${input.name}/package.json`).write(
-    JSON.stringify(
-      {
-        name: input.name,
-        bin: {
-          [input.command]: `./bin/${input.command}.exe`,
-          ...(input.legacyCommand ? { [input.legacyCommand]: `./bin/${input.command}.exe` } : {}),
-        },
-        ...(input.command !== input.binary ? { opencodeSourceBinary: input.binary } : {}),
-        scripts: { postinstall: "node ./postinstall.mjs" },
-        version,
-        license: pkg.license,
-        repository: { type: "git", url: "git+https://github.com/anomalyco/opencode.git" },
-        os: ["darwin", "linux", "win32"],
-        cpu: ["arm64", "x64"],
-        optionalDependencies: binaries,
-      },
-      null,
-      2,
-    ),
-  )
-
-  await Promise.all(
-    Object.entries(binaries).map(([name, version]) =>
-      publish(`${input.root}/${name.replace("@opencode/", "")}`, name, version),
-    ),
-  )
-  await publish(`${input.root}/${input.name}`, input.name, version)
-  const files = await UpdateArtifact.upload({
-    version,
-    files: await Promise.all(
-      Object.keys(binaries).map((name) =>
-        archive(
-          path.join(input.root, name.replace("@opencode/", ""), "bin"),
-          name.slice(input.packagePrefix.length),
-          input.binary,
-          input.root,
-        ),
-      ),
-    ),
-    dryRun,
-  })
-  const artifact = {
-    channel: Script.channel,
-    name: input.artifact,
-    distribution: "opencode",
-    version,
-    metadata: { files },
+  if (output.includes("E429") || output.includes("Too Many Requests") || output.includes("rate limited")) {
+    throw new Error(
+      `npm rate limited publication of ${name}; wait for the registry limit to clear and retry this package with MARSAI_PUBLISH_ONLY=${name}`,
+    )
   }
-  if (dryRun) {
-    console.log(`dry-run artifact: ${JSON.stringify(artifact)}`)
-    return
+  throw new Error(`Failed to publish ${name}@${version}`)
+}
+
+const expectedBinaries = [
+  "linux-arm64",
+  "linux-x64",
+  "linux-x64-baseline",
+  "linux-arm64-musl",
+  "linux-x64-musl",
+  "linux-x64-baseline-musl",
+  "darwin-arm64",
+  "darwin-x64",
+  "darwin-x64-baseline",
+  "windows-arm64",
+  "windows-x64",
+  "windows-x64-baseline",
+].map((target) => `${pkg.name}-${target}`)
+const binaries: Record<string, string> = {}
+for (const filepath of new Bun.Glob("**/package.json").scanSync({ cwd: root })) {
+  if (filepath.startsWith("marscli/")) continue
+  const item = await Bun.file(`${root}/${filepath}`).json()
+  if (item.name === pkg.name) continue
+  if (expectedBinaries.includes(item.name)) {
+    const target = item.name.slice(pkg.name.length + 1)
+    const command = `marscli-native-${target}`
+    const executable = target.startsWith("windows-") ? "./bin/mars.exe" : "./bin/mars"
+    if (Object.keys(item.bin ?? {}).length !== 1 || item.bin?.[command] !== executable) {
+      throw new Error(`Invalid native bin metadata for ${item.name}; only the launcher may declare the mars command`)
+    }
+    const binaryName = target.startsWith("windows-") ? "mars.exe" : "mars"
+    if (!(await Bun.file(`${root}/${item.name}/bin/${binaryName}`).exists())) {
+      throw new Error(`Missing native binary for ${item.name}`)
+    }
   }
-  await UpdateArtifact.publish({
-    channel: Script.channel,
-    name: input.artifact,
-    distribution: "npm",
-    version,
-    metadata: { package: input.name },
-  })
-  await UpdateArtifact.publish(artifact)
+  binaries[item.name] = item.version
+}
+console.log("binaries", binaries)
+const missingBinaries = expectedBinaries.filter((name) => binaries[name] === undefined)
+const unexpectedBinaries = Object.keys(binaries).filter((name) => !expectedBinaries.includes(name))
+if (missingBinaries.length > 0) throw new Error(`Missing native packages: ${missingBinaries.join(", ")}`)
+if (unexpectedBinaries.length > 0) throw new Error(`Unexpected native packages: ${unexpectedBinaries.join(", ")}`)
+const versions = [...new Set(Object.values(binaries))]
+if (versions.length !== 1 || !versions[0]) throw new Error("Native package versions are missing or inconsistent")
+const version = versions[0]
+if (version !== Script.version)
+  throw new Error(`Artifact version ${version} does not match release version ${Script.version}`)
+if (pkg.name !== "@mars_ai/marscli") throw new Error(`Unexpected launcher package name: ${pkg.name}`)
+if (pkg.bin?.mars !== "./bin/mars.cjs") throw new Error("Launcher package must expose bin/mars.cjs as the mars command")
+if (only && only !== pkg.name && !expectedBinaries.includes(only)) {
+  throw new Error(`Unknown MARSAI_PUBLISH_ONLY package: ${only}`)
 }
 
-await publishDistribution({
-  root,
-  name: pkg.name,
-  command: "opencode",
-  legacyCommand: "opencode2",
-  binary: "opencode",
-  packagePrefix: "@opencode/cli-",
-  artifact: "cli",
-})
-if (Script.channel !== "latest" && existsSync(path.join(root, "node"))) {
-  await publishDistribution({
-    root: path.join(root, "node"),
-    name: "@opencode/cli-node",
-    command: "opencode2-node",
-    binary: "opencode2-node",
-    packagePrefix: "@opencode/cli-node-",
-    artifact: "cli-node",
-  })
+await rm(launcherDir, { recursive: true, force: true })
+await $`mkdir -p ${launcherDir}/bin`
+await $`cp ./bin/mars.cjs ${launcherDir}/bin/mars.cjs`
+await $`cp ./LICENSE ${launcherDir}/LICENSE`
+await $`cp ./README.md ${launcherDir}/README.md`
+for (const name of Object.keys(binaries)) {
+  await $`cp ./LICENSE ${root}/${name}/LICENSE`
 }
+await Bun.file(`${launcherDir}/package.json`).write(
+  JSON.stringify(
+    {
+      name: pkg.name,
+      bin: pkg.bin,
+      files: ["bin", "README.md", "LICENSE"],
+      version,
+      description: pkg.description,
+      license: pkg.license,
+      homepage: pkg.homepage,
+      ...(process.env.MARSAI_REPOSITORY_URL
+        ? { repository: { type: "git", url: process.env.MARSAI_REPOSITORY_URL } }
+        : {}),
+      os: ["darwin", "linux", "win32"],
+      cpu: ["arm64", "x64"],
+      optionalDependencies: binaries,
+      publishConfig: { access: "public" },
+    },
+    null,
+    2,
+  ),
+)
 
-if (Script.channel === "latest" && Script.release && !dryRun) {
-  await $`docker buildx build --platform linux/amd64,linux/arm64 --tag ghcr.io/anomalyco/opencode:${Script.version} --push .`
-}
-
-if ((Script.channel === "beta" || Script.channel === "latest") && Script.release) {
-  await $`bun ./script/publish-aur.ts ${dryRun ? ["--dry-run"] : []}`.env({ ...process.env, OPENCODE_CLI_DIST: root })
-  await $`bun ./script/publish-homebrew.ts ${dryRun ? ["--dry-run"] : []}`.env({
-    ...process.env,
-    OPENCODE_CLI_DIST: root,
-  })
-}
-
-async function archive(bin: string, target: string, binary: string, directory: string) {
-  const executable = `${binary}${target.startsWith("windows-") ? ".exe" : ""}`
-  const source = path.join(bin, executable)
-  if (!(await Bun.file(source).exists()) || !Bun.file(source).size) throw new Error(`Missing binary: ${source}`)
-  // GitHub artifact downloads lose execute bits. Fixed timestamps make retries reproducible.
-  await chmod(source, 0o755)
-  await utimes(source, new Date("1980-01-01T00:00:00Z"), new Date("1980-01-01T00:00:00Z"))
-  const extension = target.startsWith("linux-") ? "tar.gz" : "zip"
-  const output = path.join(directory, `${binary}-${target}.${extension}`)
-  await rm(output, { force: true })
-  if (extension === "tar.gz") {
-    await $`tar --mtime=@0 --owner=0 --group=0 --numeric-owner -czf ${output} -C ${bin} ${executable}`
+const publishEntries = Object.entries(binaries)
+  .sort(([left], [right]) => left.localeCompare(right))
+  .map(([name, binaryVersion]) => [`${root}/${name}`, name, binaryVersion] as const)
+if (!only || only !== pkg.name) {
+  for (const [packageDir, name, binaryVersion] of publishEntries) {
+    if (!only || only === name) await publish(packageDir, name, binaryVersion)
   }
-  if (extension === "zip") await $`zip -X -q ${output} ${executable}`.cwd(bin)
-  return output
+}
+if (!only || only === pkg.name) {
+  if (!dryRun) {
+    // npm can accept an upload before registry processing makes it retrievable.
+    // Retry only metadata reads here, never an accepted native upload.
+    const deadline = Date.now() + 10 * 60_000
+    for (;;) {
+      const checks = await Promise.all(
+        Object.keys(binaries).map(async (name) => [name, await published(name, version)] as const),
+      )
+      const missing = checks.filter(([, isPublished]) => !isPublished).map(([name]) => name)
+      if (missing.length === 0) break
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Cannot publish ${pkg.name}; native dependencies are not yet available: ${missing.join(", ")}. Resume with MARSAI_PUBLISH_ONLY=${pkg.name} after registry processing finishes`,
+        )
+      }
+      console.log(
+        `Waiting for npm processing: ${checks.length - missing.length}/${checks.length} native packages available`,
+      )
+      await Bun.sleep(30_000)
+    }
+  }
+  await publish(launcherDir, pkg.name, version)
 }

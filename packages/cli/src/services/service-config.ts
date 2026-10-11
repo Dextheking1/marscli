@@ -41,9 +41,10 @@ export function filename(channel = OPENCODE_CHANNEL) {
 }
 
 export function defaultPort(channel = OPENCODE_CHANNEL) {
-  if (channel === "latest" || channel === "dev" || channel === "beta" || channel === "next") return 0xc0de
-  if (channel === "local") return 0xc0df
-  return 10_000 + (Number.parseInt(Hash.fast(channel).slice(0, 8), 16) % 50_000)
+  // MarsCLI fork: shifted +100 from upstream so the two CLIs' background services can run side by side.
+  if (channel === "latest" || channel === "dev" || channel === "beta" || channel === "next") return 0xc0de + 100
+  if (channel === "local") return 0xc0df + 100
+  return 10_100 + (Number.parseInt(Hash.fast(channel).slice(0, 8), 16) % 50_000)
 }
 
 export function legacyFilename(channel = OPENCODE_CHANNEL) {

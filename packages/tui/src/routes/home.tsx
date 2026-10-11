@@ -22,6 +22,19 @@ const placeholder = {
   shell: ["ls -la", "git status", "pwd"],
 }
 
+function HomeHeader() {
+  const theme = useTheme()
+
+  return (
+    <box width="100%" paddingTop={1} paddingBottom={1} paddingLeft={3} paddingRight={3} flexDirection="row" flexShrink={0}>
+      <text>
+        <span style={{ fg: "#f97316", bold: true }}>▣ MarsCLI</span>
+        <span style={{ fg: theme.text.muted }}> · V2</span>
+      </text>
+    </box>
+  )
+}
+
 export function Home() {
   const route = useRouteData("home")
   const promptRef = usePromptRef()
@@ -80,6 +93,7 @@ export function Home() {
 
   return (
     <>
+      <HomeHeader />
       <box
         flexGrow={1}
         alignItems="center"

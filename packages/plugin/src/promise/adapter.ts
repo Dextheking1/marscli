@@ -341,6 +341,7 @@ export function fromPromise(plugin: Plugin) {
           },
           model: {
             list: adaptApiMethod(ModelEndpoints["model.list"], host.model.list),
+            probe: adaptApiMethod(ModelEndpoints["model.probe"], host.model.probe),
             default: adaptApiMethod(ModelEndpoints["model.default"], host.model.default),
             transform: transform(host.model),
             reload: () => run(host.model.reload()),

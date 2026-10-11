@@ -24,6 +24,7 @@ const generate = makeLocationNode({
               }),
             ),
           ),
+        probe: () => Effect.succeed([]),
       })
     }),
   ),

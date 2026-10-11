@@ -262,6 +262,16 @@ const attemptLifetime = Duration.toMillis(Duration.minutes(10))
 const terminalRetention = Duration.toMillis(Duration.minutes(1))
 const scrubInterval = Duration.seconds(30)
 
+const refreshLocks = new Map<string, Promise<unknown>>()
+
+/** Serialize critical sections per credential id: concurrent refreshes race refresh-token rotation. */
+export function refreshSingleFlight<A>(id: string, task: () => Promise<A>): Promise<A> {
+  const previous = refreshLocks.get(id) ?? Promise.resolve()
+  const next = previous.then(task, task)
+  refreshLocks.set(id, next.catch(() => {}))
+  return next
+}
+
 type AttemptTime = { created: number; expires: number }
 type PendingAttempt = {
   status: "pending"
@@ -728,15 +738,31 @@ const layer = Layer.effect(
           const credential = yield* credentials.get(connection.id)
           if (!credential) return undefined
           if (credential.value.type !== "oauth") return credential.value
-          const implementation = state
+          const refresh = state
             .get()
             .integrations.get(credential.integrationID)
-            ?.implementations.get(credential.value.methodID)
-          if (!implementation?.refresh) return credential.value
+            ?.implementations.get(credential.value.methodID)?.refresh
+          if (!refresh) return credential.value
           const now = yield* Clock.currentTimeMillis
           if (credential.value.expires > now + Duration.toMillis(Duration.minutes(5))) return credential.value
-          const value = yield* authorize(implementation.refresh(credential.value))
-          yield* credentials.update(credential.id, { value })
+          // Single-flight per credential: multiple Location-scoped plugin instances refresh the same
+          // credential when it expires; without this, refresh-token rotation races and the loser's
+          // stale refresh token revokes the winner's fresh one (user gets signed out).
+          const section = Effect.gen(function* () {
+            // Re-read inside the critical section: another instance may have already refreshed.
+            const fresh = yield* credentials.get(credential.id)
+            if (!fresh || fresh.value.type !== "oauth") return credential.value
+            const at = yield* Clock.currentTimeMillis
+            if (fresh.value.expires > at + Duration.toMillis(Duration.minutes(5))) return fresh.value
+            const value = yield* authorize(refresh(fresh.value))
+            yield* credentials.update(fresh.id, { value })
+            return value
+          })
+          const run = Effect.runPromiseWith(yield* Effect.context())
+          const value = yield* Effect.tryPromise({
+            try: () => refreshSingleFlight(credential.id, () => run(section)),
+            catch: (cause) => new AuthorizationError({ cause }),
+          })
           return value
         }),
         key: Effect.fn("Integration.connection.key")(function* (input) {

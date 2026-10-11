@@ -78,7 +78,7 @@ export interface Data {
       sync(sessionID: string): Promise<void>
       invalidate(sessionID: string): void
     }
-    sync(sessionID: string): Promise<void>
+    sync(sessionID: string, options?: { children?: boolean }): Promise<void>
     invalidate(sessionID: string): void
     readonly message: {
       list(sessionID: string): SessionMessageInfo[]

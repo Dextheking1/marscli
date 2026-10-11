@@ -58,19 +58,30 @@ export namespace RipgrepBinary {
         const dir = yield* fs.makeTempDirectoryScoped({ directory: global.bin, prefix: "ripgrep-" })
 
         if (config.extension === "zip") {
-          const shell =
-            (yield* Effect.sync(() => findExecutable("powershell.exe") ?? findExecutable("pwsh.exe"))) ??
-            "powershell.exe"
-          const result = yield* run(shell, [
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            `$global:ProgressPreference = 'SilentlyContinue'; Expand-Archive -LiteralPath '${archive.replaceAll("'", "''")}' -DestinationPath '${dir.replaceAll("'", "''")}' -Force`,
-          ])
-          if (result.code !== 0)
-            throw new Error(
-              result.stderr.trim() || result.stdout.trim() || `ripgrep extraction failed with code ${result.code}`,
-            )
+          // tar.exe (bundled with Windows 10 1803+) extracts zip natively; Expand-Archive has
+          // failed in some service environments (module load errors under spawned context).
+          const tar = yield* Effect.sync(() => findExecutable("tar.exe") ?? findExecutable("tar"))
+          if (tar) {
+            const result = yield* run(tar, ["-xf", archive, "-C", dir])
+            if (result.code !== 0)
+              throw new Error(
+                result.stderr.trim() || result.stdout.trim() || `ripgrep extraction failed with code ${result.code}`,
+              )
+          } else {
+            const shell =
+              (yield* Effect.sync(() => findExecutable("powershell.exe") ?? findExecutable("pwsh.exe"))) ??
+              "powershell.exe"
+            const result = yield* run(shell, [
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              `$global:ProgressPreference = 'SilentlyContinue'; Expand-Archive -LiteralPath '${archive.replaceAll("'", "''")}' -DestinationPath '${dir.replaceAll("'", "''")}' -Force`,
+            ])
+            if (result.code !== 0)
+              throw new Error(
+                result.stderr.trim() || result.stdout.trim() || `ripgrep extraction failed with code ${result.code}`,
+              )
+          }
         }
 
         if (config.extension === "tar.gz") {

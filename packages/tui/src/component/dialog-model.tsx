@@ -201,7 +201,7 @@ export function sortModelOptions<
     const name = grouped ? (a.providerName ?? "").localeCompare(b.providerName ?? "") : 0
     if (name !== 0) return name
 
-    const free = Number(b.footer === "Free") - Number(a.footer === "Free")
+    const free = Number(a.footer === "Free") - Number(b.footer === "Free")
     if (free !== 0) return free
 
     const release = Number(b.releaseDate) - Number(a.releaseDate)
@@ -211,6 +211,10 @@ export function sortModelOptions<
   })
 }
 
-function free(model: { cost: Array<{ input: number }> }) {
+function free(model: { cost: Array<{ input: number }>; body?: { [x: string]: any } }) {
+  // MarsAI tags models explicitly; its catalog carries no dollar pricing, so a paid model
+  // would otherwise read as "Free" from its zero cost alone.
+  if (model.body?.mars_access === "paid") return false
+  if (model.body?.mars_access === "free") return true
   return model.cost.length > 0 && model.cost.every((cost) => cost.input === 0)
 }

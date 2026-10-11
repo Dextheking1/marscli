@@ -1,9 +1,12 @@
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Global } from "@opencode/util/global"
 import { run } from "@opencode/tui"
+import { log } from "@clack/prompts"
 import { Commands } from "../commands"
 import { Runtime } from "../../framework/runtime"
 import { Config } from "../../config"
+import { connectMethods, loadIntegrations } from "./auth/shared"
+import { oauthLogin } from "./auth/login"
 import { Context, Effect, FileSystem, Option, Queue, Schedule, Semaphore } from "effect"
 import { ServerConnection } from "../../services/server-connection"
 import { Updater } from "../../services/updater"
@@ -50,6 +53,23 @@ export default Runtime.handler(Commands, (input) =>
         Effect.promise(() => preflight.fail("OpenCode update could not start the new background service")),
       ),
     )
+    // A user without a MarsAI account is signed in on the spot: the device OAuth URL opens in
+    // the browser and the CLI waits, so a fresh `mars` never needs a separate `auth login`.
+    const client = OpenCode.make({ baseUrl: server.endpoint.url, headers: Service.headers(server.endpoint) })
+    const integrations = yield* loadIntegrations(client).pipe(Effect.catchCause(() => Effect.succeed([])))
+    const mars = integrations.find((integration) => integration.id === "marsai")
+    const method = mars && connectMethods(mars).find((candidate) => candidate.type === "oauth")
+    // A migrated v1 credential can exist but be rejected server-side; needs_auth asks for a
+    // fresh sign-in exactly like a fresh install does.
+    const needsAuth = mars?.connections.some((connection) => connection.status?.status === "needs_auth") ?? false
+    if (mars && (mars.connections.length === 0 || needsAuth) && method) {
+      log.info("Please sign in with your MarsAI account to continue — opening your browser...")
+      yield* oauthLogin(client, mars, method).pipe(
+        Effect.catch((error) =>
+          Effect.fail(new Error(`${errorMessage(error)} — run \`mars auth login\` to try again`)),
+        ),
+      )
+    }
     const session = Option.getOrUndefined(input.session)
     // A missing --session ID becomes the ID of the session the first prompt creates.
     const sessionExists =

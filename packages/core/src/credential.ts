@@ -5,6 +5,7 @@ import { Cause, Context, Effect, Layer, Schema } from "effect"
 import { Credential } from "@opencode/schema/credential"
 import { Integration } from "@opencode/schema/integration"
 import { Database } from "./database/database.js"
+import { Secret } from "./util/secret.js"
 import { Bus } from "./bus.js"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { CredentialTable } from "./credential/sql.js"
@@ -70,11 +71,12 @@ const layer = Layer.effect(
     const decode = Schema.decodeUnknownSync(Value)
     const stored = (row: typeof CredentialTable.$inferSelect) => {
       if (!row.integration_id) return
+      const value = decode(typeof row.value === "string" ? JSON.parse(Secret.decrypt(row.value)) : row.value)
       return new Info({
         id: row.id,
         integrationID: row.integration_id,
         label: row.label,
-        value: decode(row.value),
+        value,
       })
     }
     const storedRows = (rows: ReadonlyArray<typeof CredentialTable.$inferSelect>) =>
@@ -137,7 +139,7 @@ const layer = Layer.effect(
                   id: credential.id,
                   integration_id: credential.integrationID,
                   label: credential.label,
-                  value: credential.value,
+                  value: Secret.encrypt(JSON.stringify(credential.value)) as unknown as Credential.Value,
                   active: activate,
                 })
                 .run()
@@ -228,7 +230,13 @@ const layer = Layer.effect(
         if (updates.label === credential.label && updates.value === undefined) return
         const updated = yield* db
           .update(CredentialTable)
-          .set({ label: updates.label, value: updates.value })
+          .set({
+            label: updates.label,
+            value:
+              updates.value === undefined
+                ? undefined
+                : (Secret.encrypt(JSON.stringify(updates.value)) as unknown as Credential.Value),
+          })
           .where(eq(CredentialTable.id, id))
           .returning({ id: CredentialTable.id })
           .get()

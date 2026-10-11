@@ -18,10 +18,10 @@ if (!semver.satisfies(process.versions.bun, expectedBunVersionRange)) {
 }
 
 const env = {
-  OPENCODE_CHANNEL: process.env["OPENCODE_CHANNEL"],
-  OPENCODE_BUMP: process.env["OPENCODE_BUMP"],
-  OPENCODE_VERSION: process.env["OPENCODE_VERSION"],
-  OPENCODE_RELEASE: process.env["OPENCODE_RELEASE"],
+  OPENCODE_CHANNEL: process.env["MARSAI_CHANNEL"] ?? process.env["OPENCODE_CHANNEL"],
+  OPENCODE_BUMP: process.env["MARSAI_BUMP"] ?? process.env["OPENCODE_BUMP"],
+  OPENCODE_VERSION: process.env["MARSAI_VERSION"] ?? process.env["OPENCODE_VERSION"],
+  OPENCODE_RELEASE: process.env["MARSAI_RELEASE"] ?? process.env["OPENCODE_RELEASE"],
 }
 const CHANNEL = await (async () => {
   if (env.OPENCODE_CHANNEL) return env.OPENCODE_CHANNEL
@@ -38,7 +38,7 @@ const IS_PREVIEW = CHANNEL !== "latest"
 const VERSION = await (async () => {
   if (env.OPENCODE_VERSION) return env.OPENCODE_VERSION
   if (IS_PREVIEW) return `0.0.0-${CHANNEL}-${previewBuildNumber()}`
-  const version = await fetch("https://registry.npmjs.org/@opencode%2fcli/latest")
+  const version = await fetch("https://registry.npmjs.org/@mars_ai%2fmarscli/latest")
     .then((res) => {
       if (!res.ok) throw new Error(res.statusText)
       return res.json()

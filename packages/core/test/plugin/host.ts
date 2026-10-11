@@ -56,6 +56,7 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       default: () => Effect.die("unused model.default"),
       transform: () => Effect.die("unused model.transform"),
       reload: () => Effect.die("unused model.reload"),
+      probe: () => Effect.die("unused model.probe"),
     },
     command: overrides.command ?? {
       list: () => Effect.die("unused command.list"),
@@ -289,6 +290,7 @@ export function modelHost(models: Model.Interface): Plugin.Context["model"] {
           },
         }),
       ),
+    probe: () => Effect.die("unused model.probe"),
   }
 }
 

@@ -1,15 +1,27 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@opencode/cli",
-  "version": "2.0.26",
+  "name": "@mars_ai/marscli",
+  "version": "2.0.0",
+  "description": "MarsAI command-line coding agent",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://marsai.click",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "marsai",
+    "cli"
+  ],
   "bin": {
-    "opencode": "./bin/opencode.cjs",
-    "opencode2": "./bin/opencode2.cjs"
+    "mars": "./bin/mars.cjs"
   },
   "files": [
-    "bin"
+    "bin",
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     "./vite-host": "./dev/host.js",
@@ -18,19 +30,22 @@
   },
   "scripts": {
     "build": "bun run script/build.ts",
-    "build:node": "bun run script/build-node.ts",
+    "build:current": "bun run script/build.ts --single --skip-install",
     "dev": "bun run src/index.ts",
     "test": "bun test --timeout 30000 --only-failures",
-    "typecheck": "tsgo -b"
+    "typecheck": "tsgo -b",
+    "publish:release": "bun run script/publish.ts",
+    "publish:check": "bun run script/publish.ts --dry-run",
+    "pack:check": "npm pack --dry-run"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.6.0",
     "@clack/core": "1.0.0-alpha.1",
     "@clack/prompts": "1.0.0-alpha.1",
     "@effect/platform-node": "catalog:",
+    "@opencode-ai/pty": "0.2.0",
     "@opencode/client": "workspace:*",
     "@opencode/plugin": "workspace:*",
-    "@opencode-ai/pty": "0.2.0",
     "@opencode/schema": "workspace:*",
     "@opencode/server": "workspace:*",
     "@opencode/tui": "workspace:*",
@@ -75,8 +90,11 @@
     "@yuuang/ffi-rs-win32-arm64-msvc": "1.3.2",
     "@yuuang/ffi-rs-win32-x64-msvc": "1.3.2",
     "@parcel/watcher-darwin-arm64": "2.5.1",
+    "@parcel/watcher-darwin-x64": "2.5.1",
     "@parcel/watcher-linux-arm64-glibc": "2.5.1",
+    "@parcel/watcher-linux-arm64-musl": "2.5.1",
     "@parcel/watcher-linux-x64-glibc": "2.5.1",
+    "@parcel/watcher-linux-x64-musl": "2.5.1",
     "@parcel/watcher-win32-arm64": "2.5.1",
     "@parcel/watcher-win32-x64": "2.5.1",
     "solid-refresh": "0.6.3",
