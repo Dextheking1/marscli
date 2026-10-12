@@ -221,6 +221,8 @@ export const MarsPlugin = define<HttpClient.HttpClient | Bus.Service | Scope.Sco
     yield* ctx.integration.transform((editor) => {
       editor.update(integrationID, (integration) => {
         integration.name = "MarsAI"
+        // Consumer integration: exactly one account, new sign-ins replace the old credential.
+        integration.metadata = { ...integration.metadata, single: true }
       })
       editor.method.update(oauth(http))
       // Server-side OAuth can hand out an expired API key as the access token; a direct key

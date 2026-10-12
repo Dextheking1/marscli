@@ -476,9 +476,12 @@ const layer = Layer.effect(
             value: exit.value,
           })
         }).pipe(Effect.exit)
-        // One account per integration: a fresh login replaces any earlier credential instead of
-        // stacking duplicates (multi-account on a consumer integration is abuse surface).
-        if (Exit.isSuccess(persistence)) {
+        // Single-account integrations: a fresh login replaces any earlier credential instead of
+        // stacking duplicates.
+        if (
+          Exit.isSuccess(persistence) &&
+          state.get().integrations.get(attempt.integrationID)?.ref.metadata?.single === true
+        ) {
           const others = (yield* credentials.list(attempt.integrationID)).filter(
             (credential) => credential.id !== persistence.value.id,
           )
@@ -787,7 +790,7 @@ const layer = Layer.effect(
           if (!method.form && Object.keys(answer).length > 0) {
             return yield* new AuthorizationError({ cause: new Error("Key method does not accept a form answer") })
           }
-          yield* createCredential({
+          const created = yield* createCredential({
             integrationID: input.integrationID,
             label: input.label,
             value: Credential.Key.make({
@@ -796,6 +799,13 @@ const layer = Layer.effect(
               ...(Object.keys(answer).length > 0 ? { configuration: answer } : {}),
             }),
           })
+          // Single-account integrations: the pasted key replaces earlier credentials.
+          if (state.get().integrations.get(input.integrationID)?.ref.metadata?.single === true) {
+            const others = (yield* credentials.list(input.integrationID)).filter(
+              (credential) => credential.id !== created.id,
+            )
+            for (const other of others) yield* credentials.remove(other.id).pipe(Effect.ignore)
+          }
         }),
         external: Effect.fn("Integration.connection.external")(function* (input) {
           const method = state

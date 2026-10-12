@@ -6,7 +6,7 @@ import { Form } from "@opencode/schema/form"
 import type { Effect, Scope } from "effect"
 import type { Transform } from "./registration.js"
 
-type IntegrationRef = { id: string; name: string }
+type IntegrationRef = { id: string; name: string; metadata?: Record<string, unknown> }
 
 export interface IntegrationOAuthMethod {
   readonly id: string
