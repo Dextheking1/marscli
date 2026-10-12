@@ -718,10 +718,12 @@ export function AssistantReasoningContent(props: {
     })
   })
 
-  // MiniMax and other reasoning models can emit literal <think> tags inside the
-  // reasoning stream; strip them so the collapsed/expanded view shows only the
-  // model's thoughts, never the markup.
-  const display = createMemo(() => props.content.text.replace(/<\/?think>/g, ""))
+  // MiniMax and other reasoning models can emit literal <think> tags and ANSI escape
+  // codes inside the reasoning stream; strip both so the collapsed/expanded view shows
+  // only the model's thoughts, never raw markup or control bytes.
+  const display = createMemo(() =>
+    props.content.text.replace(/<\/?think>/g, "").replace(/?\[[0-9;]*[A-Za-z]/g, ""),
+  )
   const blank = createMemo(() => !display().trim())
   const cleanHeading = createMemo(() => (heading() ?? "").replace(/<\/?think>/g, ""))
 
