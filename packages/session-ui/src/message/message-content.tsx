@@ -718,48 +718,57 @@ export function AssistantReasoningContent(props: {
     })
   })
 
+  // MiniMax and other reasoning models can emit literal <think> tags inside the
+  // reasoning stream; strip them so the collapsed/expanded view shows only the
+  // model's thoughts, never the markup.
+  const display = createMemo(() => props.content.text.replace(/<\/?think>/g, ""))
+  const blank = createMemo(() => !display().trim())
+  const cleanHeading = createMemo(() => (heading() ?? "").replace(/<\/?think>/g, ""))
+
   return (
-    <div data-component="reasoning-part" data-timeline-part-id={props.id}>
-      <BasicTool
-        icon="mcp"
-        status={props.streaming ? "running" : "completed"}
-        compact
-        hasContent
-        allowOpenWhilePending
-        hideDetails={!props.content.text.trim()}
-        open={open()}
-        onOpenChange={(value) => {
-          setState("open", value)
-          props.onOpenChange?.(value)
-          props.onContentRendered?.()
-        }}
-        trigger={
-          <div data-slot="basic-tool-tool-info-structured">
-            <div data-slot="basic-tool-tool-info-main">
-              <span data-slot="basic-tool-tool-title">
-                <TextShimmer
-                  text={i18n.t(props.streaming ? "ui.sessionTurn.status.thinking" : "ui.message.thought")}
-                  active={props.streaming}
-                />
-              </span>
-              <Show
-                when={props.streaming && !open()}
-                fallback={
-                  <Show when={!props.streaming && duration()}>
-                    {(value) => <span data-slot="basic-tool-tool-subtitle">{value()}</span>}
-                  </Show>
-                }
-              >
-                <span data-slot="basic-tool-tool-subtitle">
-                  <TextReveal text={heading()} />
+    <Show when={!blank()}>
+      <div data-component="reasoning-part" data-timeline-part-id={props.id}>
+        <BasicTool
+          icon="mcp"
+          status={props.streaming ? "running" : "completed"}
+          compact
+          hasContent
+          allowOpenWhilePending
+          hideDetails={blank()}
+          open={open()}
+          onOpenChange={(value) => {
+            setState("open", value)
+            props.onOpenChange?.(value)
+            props.onContentRendered?.()
+          }}
+          trigger={
+            <div data-slot="basic-tool-tool-info-structured">
+              <div data-slot="basic-tool-tool-info-main">
+                <span data-slot="basic-tool-tool-title">
+                  <TextShimmer
+                    text={i18n.t(props.streaming ? "ui.sessionTurn.status.thinking" : "ui.message.thought")}
+                    active={props.streaming}
+                  />
                 </span>
-              </Show>
+                <Show
+                  when={props.streaming && !open()}
+                  fallback={
+                    <Show when={!props.streaming && duration()}>
+                      {(value) => <span data-slot="basic-tool-tool-subtitle">{value()}</span>}
+                    </Show>
+                  }
+                >
+                  <span data-slot="basic-tool-tool-subtitle">
+                    <TextReveal text={cleanHeading()} />
+                  </span>
+                </Show>
+              </div>
             </div>
-          </div>
-        }
-      >
-        <PacedMarkdown text={props.content.text} cacheKey={props.id} streaming={props.streaming} />
-      </BasicTool>
-    </div>
+          }
+        >
+          <PacedMarkdown text={display()} cacheKey={props.id} streaming={props.streaming} />
+        </BasicTool>
+      </div>
+    </Show>
   )
 }
