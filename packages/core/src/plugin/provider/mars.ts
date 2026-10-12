@@ -223,6 +223,9 @@ export const MarsPlugin = define<HttpClient.HttpClient | Bus.Service | Scope.Sco
         integration.name = "MarsAI"
       })
       editor.method.update(oauth(http))
+      // Server-side OAuth can hand out an expired API key as the access token; a direct key
+      // paste gives users a working path while that is broken.
+      editor.method.update({ integrationID, method: { type: "key", label: "MarsAI API key" } })
     })
 
     const initial = yield* load()
