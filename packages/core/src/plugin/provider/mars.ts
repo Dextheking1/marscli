@@ -8,6 +8,7 @@ import { Money } from "@opencode/schema/money"
 import { Bus } from "../../bus.js"
 import { Credential } from "../../credential.js"
 import { Integration } from "../../integration.js"
+import { Machine } from "../../util/machine.js"
 import { Provider } from "../../provider.js"
 
 const defaultServer = (process.env.MARSAI_URL ?? "https://marsai.click").replace(/\/+$/, "").replace(/\/v1$/i, "")
@@ -227,7 +228,7 @@ export const MarsPlugin = define<HttpClient.HttpClient | Bus.Service | Scope.Sco
       editor.method.update(oauth(http))
       // Server-side OAuth can hand out an expired API key as the access token; a direct key
       // paste gives users a working path while that is broken.
-      editor.method.update({ integrationID, method: { type: "key", label: "MarsAI API key" } })
+      editor.method.update(oauth(http))
     })
 
     const initial = yield* load()
@@ -303,9 +304,16 @@ function post<S extends Schema.Top>(
   schema: S,
   statusOk = true,
 ) {
-  const request = HttpClientRequest.post(url).pipe(HttpClientRequest.acceptJson, HttpClientRequest.bodyUrlParams(body))
-  return http.execute(request).pipe(
-    Effect.flatMap((response) => (statusOk ? HttpClientResponse.filterStatusOk(response) : Effect.succeed(response))),
-    Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
-  )
+  // Every auth call carries the machine fingerprint so the server can bind one
+  // account to one machine and flag multi-account abuse.
+  return Effect.flatMap(Effect.promise(() => Machine.machineID()), (machine) => {
+    const request = HttpClientRequest.post(url).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bodyUrlParams({ ...body, machine }),
+    )
+    return http.execute(request).pipe(
+      Effect.flatMap((response) => (statusOk ? HttpClientResponse.filterStatusOk(response) : Effect.succeed(response))),
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
+    )
+  })
 }
