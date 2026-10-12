@@ -255,9 +255,10 @@ const layer = Layer.effect(
           prepared,
           retry: (cause, error, proposed) =>
             Effect.gen(function* () {
-              // MarsCLI fail-fast: a pool model never waits out retries. Rotate to the next
-              // MarsAI candidate (pool first, then paid) and retry the step with the new model.
-              if (SubagentPool.isPoolModel(loaded.model.ref)) {
+              // MarsCLI fail-fast: subagent runs on pool models never wait out retries — rotate to
+              // the next MarsAI candidate (pool first, then paid). A user-selected main model is
+              // never swapped, even when it is a pool/free model.
+              if (loaded.session.parentID !== undefined && SubagentPool.isPoolModel(loaded.model.ref)) {
                 const candidate = SubagentPool.escalate(loaded.model.ref, yield* models.available())
                 if (candidate !== undefined) {
                   yield* bus.publish(SessionEvent.ModelSelected, {
