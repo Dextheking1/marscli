@@ -1,6 +1,6 @@
-import { Duration, Effect, Schema, Semaphore, Stream } from "effect"
+import { Duration, Effect, Schedule, Schema, Semaphore, Stream } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
-import type { Scope } from "effect"
+import { Scope } from "effect"
 import type { IntegrationOAuthMethodRegistration } from "@opencode/plugin/effect/integration"
 import { define } from "@opencode/plugin/effect/plugin"
 import { Model as ModelSchema } from "@opencode/schema/model"
@@ -78,7 +78,9 @@ function oauth(http: HttpClient.HttpClient) {
         const token = yield* post(
           http,
           `${server}/oauth/token`,
-          { grant_type: "refresh_token", refresh_token: credential.refresh, client_id: clientID },
+          // Scope must travel on the refresh grant too, or the new access token can come back
+          // scoped-down and 401 every API call while refresh itself succeeds.
+          { grant_type: "refresh_token", refresh_token: credential.refresh, client_id: clientID, scope },
           Token,
         )
         return {
@@ -123,6 +125,16 @@ export const MarsPlugin = define<HttpClient.HttpClient | Bus.Service | Scope.Sco
     const bus = yield* Bus.Service
     const http = yield* HttpClient.HttpClient
     const loading = Semaphore.makeUnsafe(1)
+    const scope = yield* Scope.Scope
+
+    // Keep the session alive while the service runs: resolve() refreshes the token when it is
+    // near expiry, so a periodic resolve means the login never lapses between uses.
+    const keepalive = Effect.fn("MarsPlugin.keepalive")(function* () {
+      const connection = yield* ctx.integration.connection.active(integrationID)
+      if (!connection) return
+      yield* ctx.integration.connection.resolve(connection).pipe(Effect.ignore)
+    })
+    yield* keepalive().pipe(Effect.repeat(Schedule.spaced(Duration.minutes(30))), Effect.forkIn(scope))
 
     const load = Effect.fn("MarsPlugin.load")(function* () {
       const connection = yield* ctx.integration.connection.active(integrationID)
@@ -134,13 +146,16 @@ export const MarsPlugin = define<HttpClient.HttpClient | Bus.Service | Scope.Sco
         Effect.tap(() => ctx.integration.connection.status({ integrationID, connection, status: undefined })),
         Effect.catch((cause) =>
           Effect.gen(function* () {
-            // A migrated v1 credential whose refresh token the server rejects leaves zero
-            // models with no signal. Mark it needs_auth so the UI offers a reconnect.
-            if (cause instanceof Integration.AuthorizationError) {
+            // A rejected refresh or a 401 on the model list both mean the stored session is
+            // unusable. Mark it needs_auth so the UI offers /login instead of an empty catalog.
+            if (
+              cause instanceof Integration.AuthorizationError ||
+              (cause instanceof Error && /\(401 /.test(cause.message))
+            ) {
               yield* ctx.integration.connection.status({
                 integrationID,
                 connection,
-                status: { status: "needs_auth", message: "MarsAI session expired. Sign in again." },
+                status: { status: "needs_auth", message: "MarsAI session expired. Run /login to sign in again." },
               })
             }
             return yield* Effect.logWarning("failed to load MarsAI models", { cause }).pipe(Effect.as(undefined))

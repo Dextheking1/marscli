@@ -944,10 +944,10 @@ function App() {
         },
       },
       {
-        name: "provider.connect",
-        title: "Connect an integration",
+        name: "provider.login",
+        title: "Sign in to MarsAI",
         suggested: !connected(),
-        slash: { name: "connect" },
+        slash: { name: "login" },
         run: () => {
           dialog.replace(() => (
             <DialogIntegration

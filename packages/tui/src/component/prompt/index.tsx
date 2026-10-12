@@ -316,7 +316,7 @@ export function Prompt(props: PromptProps) {
   function promptModelWarning() {
     toast.show({
       variant: "warning",
-      message: "Connect an integration to send prompts",
+      message: "No MarsAI session — run /login to sign in",
       duration: 3000,
     })
     if (!connected()) {
