@@ -183,21 +183,33 @@ export function timeouts(settings: Readonly<Record<string, unknown>>) {
   }
 }
 
+// MarsCLI-internal overlay keys ("mars_*" model-catalog metadata such as mars_access) are
+// client-side tags only. Upstream APIs (Gonka/vLLM) reject unknown parameters, so they are
+// stripped from every merged request body.
+const INTERNAL_OVERLAY_KEY = /^mars_/
+
+function dropInternalKeys(merged: Record<string, Json> | undefined) {
+  if (merged === undefined) return undefined
+  return Object.fromEntries(Object.entries(merged).filter(([key]) => !INTERNAL_OVERLAY_KEY.test(key)))
+}
+
 export function mergeOverlay(
   base: Readonly<Record<string, unknown>> | undefined,
   overlay: Readonly<Record<string, unknown>> | undefined,
 ): Record<string, Json> | undefined {
-  if (base === undefined) return overlay && decodeJsonRecord({ ...overlay })
-  if (overlay === undefined) return decodeJsonRecord({ ...base })
-  return decodeJsonRecord(
-    Object.fromEntries(
-      new Set([...Object.keys(base), ...Object.keys(overlay)]).values().map((key): [string, unknown] => {
-        const left = base[key]
-        const right = overlay[key]
-        if (right === undefined) return [key, left]
-        if (isRecord(left) && isRecord(right)) return [key, mergeOverlay(left, right) ?? {}]
-        return [key, right]
-      }),
+  if (base === undefined) return dropInternalKeys(decodeJsonRecord({ ...overlay }))
+  if (overlay === undefined) return dropInternalKeys(decodeJsonRecord({ ...base }))
+  return dropInternalKeys(
+    decodeJsonRecord(
+      Object.fromEntries(
+        new Set([...Object.keys(base), ...Object.keys(overlay)]).values().map((key): [string, unknown] => {
+          const left = base[key]
+          const right = overlay[key]
+          if (right === undefined) return [key, left]
+          if (isRecord(left) && isRecord(right)) return [key, mergeOverlay(left, right) ?? {}]
+          return [key, right]
+        }),
+      ),
     ),
   )
 }
