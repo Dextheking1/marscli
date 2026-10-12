@@ -714,13 +714,80 @@ function requestProviderOptions(
   return { [optionKey]: options }
 }
 
+const THINK_OPEN = "<think>"
+const THINK_CLOSE = "</think>"
+const THINK_TAIL = Math.max(THINK_OPEN.length, THINK_CLOSE.length) - 1
+
+/** Moves a text fragment into the reasoning channel, keeping fragment bookkeeping intact. */
+function thinkAsReasoning(state: StreamState, id: string, text: string): ReadonlyArray<LLMEvent> {
+  return [
+    ...closeFragment(state, "text", id),
+    ...openFragment(state, "reasoning", id),
+    LLMEvent.reasoningDelta({ id, text }),
+  ]
+}
+
+/** Emits chunk text on whichever channel the think state currently selects. */
+function emitThinkChunk(
+  state: StreamState,
+  id: string,
+  chunk: string,
+  providerMetadata: ProviderMetadata | undefined,
+): ReadonlyArray<LLMEvent> {
+  if (chunk === "") return []
+  return state.think.mode === "think"
+    ? thinkAsReasoning(state, id, chunk)
+    : [...openFragment(state, "text", id), LLMEvent.textDelta({ id, text: chunk, providerMetadata })]
+}
+
+/**
+ * Splits inline `<think>…</think>` blocks out of a text delta into the reasoning channel.
+ * The buffer holds an unterminated tag tail so tags split across chunks still resolve.
+ */
+function splitThinkDeltas(
+  state: StreamState,
+  id: string,
+  delta: string,
+  providerMetadata: ProviderMetadata | undefined,
+): ReadonlyArray<LLMEvent> {
+  const events: Array<LLMEvent> = []
+  const parts = (state.think.buffer + delta).split(/(<\/?think>)/)
+  state.think.buffer = ""
+  for (const [index, chunk] of parts.entries()) {
+    if (chunk === THINK_OPEN) {
+      state.think.mode = "think"
+      continue
+    }
+    if (chunk === THINK_CLOSE) {
+      state.think.mode = "text"
+      continue
+    }
+    if (index === parts.length - 1 && /<(\/t?h?i?n?k?)?$/.test(chunk)) {
+      // Trailing fragment that may become a tag once the next delta arrives.
+      state.think.buffer = chunk.slice(-THINK_TAIL)
+      events.push(...emitThinkChunk(state, id, chunk.slice(0, -THINK_TAIL), providerMetadata))
+      continue
+    }
+    events.push(...emitThinkChunk(state, id, chunk, providerMetadata))
+  }
+  return events
+}
+
+/** Flushes buffered partial-tag text at the end of a text fragment. */
+function flushThinkText(state: StreamState, id: string): ReadonlyArray<LLMEvent> {
+  const buffered = state.think.buffer
+  state.think = { mode: "text", buffer: "" }
+  if (!buffered) return []
+  return [...openFragment(state, "text", id), LLMEvent.textDelta({ id, text: buffered })]
+}
+
 function metadataProviderOptions(input: ProviderMetadata | undefined): SharedV3ProviderOptions | undefined {
   if (!input) return undefined
   return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, jsonObject(value)]))
 }
 
 function streamLanguage(language: LanguageModelV3, options: LanguageModelV3CallOptions, http?: HttpMiddleware) {
-  const state: StreamState = { step: 0, toolNames: {}, open: {} }
+  const state: StreamState = { step: 0, toolNames: {}, open: {}, think: { mode: "text", buffer: "" } }
   return Stream.concat(
     Stream.make(LLMEvent.stepStart({ index: state.step })),
     Stream.unwrap(
@@ -752,6 +819,8 @@ type StreamState = {
   step: number
   toolNames: Record<string, string>
   open: Partial<Record<Fragment, string>>
+  /** Splits inline `<think>…</think>` blocks out of text deltas (MiniMax, DeepSeek-R1 style models). */
+  think: { mode: "text" | "think"; buffer: string }
 }
 
 function streamPartEvents(
@@ -767,18 +836,15 @@ function streamPartEvents(
     case "tool-approval-request":
       return Effect.succeed([])
     case "text-start":
+      state.think = { mode: "text", buffer: "" }
       return Effect.succeed(openFragment(state, "text", event.id, providerMetadata(event.providerMetadata)))
     case "text-delta":
-      return Effect.succeed([
-        ...openFragment(state, "text", event.id),
-        LLMEvent.textDelta({
-          id: event.id,
-          text: event.delta,
-          providerMetadata: providerMetadata(event.providerMetadata),
-        }),
-      ])
+      return Effect.succeed(splitThinkDeltas(state, event.id, event.delta, providerMetadata(event.providerMetadata)))
     case "text-end":
-      return Effect.succeed(closeFragment(state, "text", event.id, providerMetadata(event.providerMetadata)))
+      return Effect.succeed([
+        ...flushThinkText(state, event.id),
+        ...closeFragment(state, "text", event.id, providerMetadata(event.providerMetadata)),
+      ])
     case "reasoning-start":
       return Effect.succeed(openFragment(state, "reasoning", event.id, providerMetadata(event.providerMetadata)))
     case "reasoning-delta":
