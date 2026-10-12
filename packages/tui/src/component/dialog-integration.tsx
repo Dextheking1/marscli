@@ -94,9 +94,12 @@ export function DialogIntegration(
   const dialog = useDialog()
   const theme = useTheme().surface("dialog")
   const location = currentLocation.ref ?? data.location.default()
+  // MarsCLI ships exactly one integration: MarsAI. Other entries (models.dev providers, MCP)
+  // only appear when a caller explicitly targets them by ID.
+  const only = props.integrationID ?? "marsai"
   const integrations = createMemo(() =>
     integrationOptions(data.location.integration.list(location) ?? []).filter(
-      (integration) => props.integrationID === undefined || integration.id === props.integrationID,
+      (integration) => integration.id === only,
     ),
   )
 
@@ -142,11 +145,11 @@ export function DialogIntegration(
 
   return (
     <DialogSelect
-      title="Connect an integration"
+      title="MarsAI account"
       options={options()}
       emptyView={
         <box paddingLeft={4} paddingRight={4}>
-          <text fg={theme.text.muted}>No integrations available</text>
+          <text fg={theme.text.muted}>MarsAI integration not available</text>
         </box>
       }
       noMatchView={
