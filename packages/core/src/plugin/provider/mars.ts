@@ -246,6 +246,9 @@ function poll(http: HttpClient.HttpClient, server: string, deviceCode: string, i
           grant_type: "urn:ietf:params:oauth:grant-type:device_code",
           device_code: deviceCode,
           client_id: clientID,
+          // The exchange must restate the scope or the server mints a scoped-down access token
+          // that 401s every API call while login itself appears to succeed.
+          scope,
         },
         DeviceToken,
         false,

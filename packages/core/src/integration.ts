@@ -475,7 +475,15 @@ const layer = Layer.effect(
             label: attempt.label ?? implementation?.label?.(exit.value),
             value: exit.value,
           })
-        }).pipe(Effect.asVoid, Effect.exit)
+        }).pipe(Effect.exit)
+        // One account per integration: a fresh login replaces any earlier credential instead of
+        // stacking duplicates (multi-account on a consumer integration is abuse surface).
+        if (Exit.isSuccess(persistence)) {
+          const others = (yield* credentials.list(attempt.integrationID)).filter(
+            (credential) => credential.id !== persistence.value.id,
+          )
+          for (const other of others) yield* credentials.remove(other.id).pipe(Effect.ignore)
+        }
         const settledAt = yield* Clock.currentTimeMillis
         const terminal: TerminalAttempt = Exit.isSuccess(persistence)
           ? {
