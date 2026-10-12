@@ -9,7 +9,7 @@ const mars = [
 ]
 
 // Badge stacked to the right of the wordmark behind a vertical rule.
-const cli = ["CLI", "●", "V2"]
+const cli = ["CLI", "*", "V2"]
 
 export const logo = {
   mars,

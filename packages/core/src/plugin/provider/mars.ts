@@ -111,10 +111,13 @@ function modelsFor(http: HttpClient.HttpClient, value: Credential.Key | Credenti
     )
     .pipe(
       Effect.flatMap((response) =>
-        HttpClientResponse.filterStatusOk(response).pipe(
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(ModelsResponse)),
-          Effect.map((remote) => remote.data),
-        ),
+        response.status !== 200
+          ? Effect.flatMap(response.text, (body) =>
+              Effect.fail(new Error(`GET /v1/models ${response.status}: ${body.slice(0, 300)}`)),
+            )
+          : HttpClientResponse.schemaBodyJson(ModelsResponse)(response).pipe(
+              Effect.map((remote) => remote.data),
+            ),
       ),
     )
 }
