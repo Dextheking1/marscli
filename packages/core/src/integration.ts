@@ -268,7 +268,12 @@ const refreshLocks = new Map<string, Promise<unknown>>()
 export function refreshSingleFlight<A>(id: string, task: () => Promise<A>): Promise<A> {
   const previous = refreshLocks.get(id) ?? Promise.resolve()
   const next = previous.then(task, task)
-  refreshLocks.set(id, next.catch(() => {}))
+  const entry = next.catch(() => {})
+  refreshLocks.set(id, entry)
+  entry.then(() => {
+    // Delete only when this entry is still the latest; a concurrent refresh may have replaced it.
+    if (refreshLocks.get(id) === entry) refreshLocks.delete(id)
+  })
   return next
 }
 

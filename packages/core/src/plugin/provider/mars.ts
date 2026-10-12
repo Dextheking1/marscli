@@ -226,9 +226,6 @@ export const MarsPlugin = define<HttpClient.HttpClient | Bus.Service | Scope.Sco
         integration.metadata = { ...integration.metadata, single: true }
       })
       editor.method.update(oauth(http))
-      // Server-side OAuth can hand out an expired API key as the access token; a direct key
-      // paste gives users a working path while that is broken.
-      editor.method.update(oauth(http))
     })
 
     const initial = yield* load()

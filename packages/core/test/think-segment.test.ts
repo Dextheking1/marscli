@@ -1,5 +1,3 @@
-import { Effect } from "effect"
-import { Stream } from "effect"
 import { describe, expect, it } from "bun:test"
 
 // Extracted decision logic mirrors aisdk.ts splitThinkDeltas: we verify the pure
