@@ -207,8 +207,7 @@ export const MarsPlugin = define<HttpClient.HttpClient | Bus.Service | Scope.Sco
                 },
                 time: { released: item.created ? item.created * 1000 : 0 },
                 body: {
-                  mars_access:
-                    item.access === "free" || item.id.toLowerCase().includes("free") ? "free" : "paid",
+                  mars_access: item.access === "free" ? "free" : "paid",
                   ...(item.label ? { mars_label: item.label } : {}),
                   ...(item.usage_ratio !== undefined ? { mars_usage_ratio: item.usage_ratio } : {}),
                 },
