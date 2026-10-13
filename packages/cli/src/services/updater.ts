@@ -131,7 +131,6 @@ const make = Effect.gen(function* () {
   const appProcess = yield* AppProcess.Service
   const flock = yield* EffectFlock.Service
   const installedVersion = yield* Ref.make(OPENCODE_VERSION)
-  const channel = OPENCODE_CHANNEL.replace(/[^a-zA-Z0-9._-]/g, "-")
   const executable = yield* fs.realPath(process.execPath).pipe(Effect.orElseSucceed(() => process.execPath))
   const installedPackage = yield* Effect.gen(function* () {
     const directory = path.dirname(path.dirname(executable))
@@ -249,20 +248,23 @@ const make = Effect.gen(function* () {
     }
   }
 
+  // MarsCLI is published to npm; the version check reads the registry directly. There is
+  // no Mars update service, and none is needed: npm `latest` already resolves to the newest
+  // published launcher version.
   const release = Effect.fnUntraced(function* (method?: Method) {
-    const distribution = method === "brew" ? "homebrew" : "npm"
-    // Homebrew Core builds its formula on its own schedule, so the tap release does not describe it.
-    const core = method === "brew" && installedFormula === "opencode"
+    if (method === "curl" || method === "brew")
+      return yield* Effect.fail(
+        new UpgradeError({
+          title: "MarsCLI updates install through npm",
+          detail: `Run "npm install --global @mars_ai/marscli@latest" to update.`,
+          retry: "npm install --global @mars_ai/marscli@latest",
+        }),
+      )
     const response = yield* Effect.tryPromise({
       try: (signal) =>
-        fetch(
-          core
-            ? "https://formulae.brew.sh/api/formula/opencode.json"
-            : `${process.env.MARSAI_UPDATE_URL ?? "https://opencode.ai/update/api"}/${encodeURIComponent(channel)}/${encodeURIComponent(OPENCODE_ARTIFACT)}/${distribution}?current=${encodeURIComponent(OPENCODE_VERSION)}`,
-          {
-            signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
-          },
-        ),
+        fetch(`https://registry.npmjs.org/${encodeURIComponent("@mars_ai/marscli")}/latest`, {
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+        }),
       catch: (cause) =>
         new UpgradeError(
           {
@@ -276,35 +278,32 @@ const make = Effect.gen(function* () {
     if (!response.ok)
       return yield* Effect.fail(
         new UpgradeError({
-          title: "Could not check for OpenCode updates",
-          detail: `The update service returned HTTP ${response.status}.`,
+          title: "Could not check for Mars CLI updates",
+          detail: `The npm registry returned HTTP ${response.status}.`,
           retry: "Try again in a few minutes.",
         }),
       )
-    const data: { version?: string; metadata?: { package?: string }; versions?: { stable?: string } } =
-      yield* Effect.tryPromise({
-        try: () => response.json(),
-        catch: (cause) =>
-          new UpgradeError(
-            {
-              title: "Could not read the OpenCode update information",
-              detail: errorDetail(cause),
-              retry: "Try again in a few minutes.",
-            },
-            { cause },
-          ),
-      })
-    const version = core ? data.versions?.stable : data.version
-    const packageName = core ? "opencode" : data.metadata?.package
-    if (!version || !packageName)
+    const data: { version?: string } = yield* Effect.tryPromise({
+      try: () => response.json(),
+      catch: (cause) =>
+        new UpgradeError(
+          {
+            title: "Could not read the Mars CLI update information",
+            detail: errorDetail(cause),
+            retry: "Try again in a few minutes.",
+          },
+          { cause },
+        ),
+    })
+    if (!data.version)
       return yield* Effect.fail(
         new UpgradeError({
-          title: "Could not read the OpenCode update information",
-          detail: "The update service returned incomplete release information.",
+          title: "Could not read the Mars CLI update information",
+          detail: "The npm registry returned incomplete release information.",
           retry: "Try again in a few minutes.",
         }),
       )
-    return { package: packageName, version }
+    return { package: "@mars_ai/marscli", version: data.version }
   })
 
   const latest = (selected?: Method) =>
