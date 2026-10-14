@@ -155,7 +155,7 @@ function prepareOptions(model: RuntimeInfo, pkg: string) {
     if (typeof opts.body === "string" && model.body !== undefined) {
       const decoded = Option.getOrUndefined(decodeJson(opts.body))
       if (Schema.is(Schema.Record(Schema.String, Schema.Json))(decoded)) {
-        opts.body = JSON.stringify(Provider.mergeOverlay(decoded, model.body))
+        opts.body = JSON.stringify(Provider.stripOverlay(Provider.mergeOverlay(decoded, model.body)))
       }
     }
 

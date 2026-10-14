@@ -686,6 +686,14 @@ function App() {
   })
 
   const connected = useConnected()
+  let loginPrompted = false
+  createEffect(() => {
+    if (loginPrompted || connected()) return
+    const integrations = data.location.integration.list()
+    if (!integrations?.some((integration) => integration.id === "marsai")) return
+    loginPrompted = true
+    dialog.replace(() => <DialogIntegration autoConnect />)
+  })
   const appCommands = createMemo(() =>
     [
       {
