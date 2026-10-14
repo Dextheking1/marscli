@@ -82,11 +82,11 @@ export const MarsPlugin = define<HttpClient.HttpClient | Bus.Service | Scope.Sco
         Effect.tap(() => ctx.integration.connection.status({ integrationID, connection, status: undefined })),
         Effect.catch((cause) =>
           Effect.gen(function* () {
-            // A rejected key or a 401 on the model list means the stored credential is
+            // A rejected key or a 401/403 on the model list means the stored credential is
             // unusable. Mark it needs_auth so the UI offers /login instead of an empty catalog.
             if (
               cause instanceof Integration.AuthorizationError ||
-              (cause instanceof Error && /\(401 /.test(cause.message))
+              (cause instanceof Error && /\b(401|403)\b/.test(cause.message))
             ) {
               yield* ctx.integration.connection.status({
                 integrationID,
