@@ -82,17 +82,19 @@ function Subagents(props: { context: Plugin.Context; sessionID: string }) {
     props.context.data.session.sync(props.sessionID, { children: true }).catch(() => {})
   })
   const models = createMemo(() => {
-    const grouped = new Map<string, { model: string; running: number; title: string }>()
+    const grouped = new Map<string, { agent: string; model: string; running: number; title: string }>()
     for (const session of props.context.data.session.list()) {
       if (session.parentID !== props.sessionID) continue
-      const model = session.model?.id.replace(/^subagent\//, "") ?? session.agent ?? "subagent"
-      const entry = grouped.get(model) ?? { model, running: 0, title: "" }
+      const model = session.model?.id.replace(/^subagent\//, "") ?? "subagent"
+      const agent = session.agent ?? "subagent"
+      const key = `${agent}:${model}`
+      const entry = grouped.get(key) ?? { agent, model, running: 0, title: "" }
       if (props.context.data.session.status(session.id) === "running") {
         entry.running++
         const title = (session.title ?? "").slice(0, 24)
         if (title && !entry.title) entry.title = title
       }
-      grouped.set(model, entry)
+      grouped.set(key, entry)
     }
     return [...grouped.values()].toSorted((a, b) => b.running - a.running).slice(0, 5)
   })
@@ -109,14 +111,12 @@ function Subagents(props: { context: Plugin.Context; sessionID: string }) {
                 {entry.running > 0 ? "✓" : "○"}
               </text>
               <text fg={entry.running > 0 ? theme.text.base : theme.text.muted} wrapMode="none">
-                {entry.title || entry.model}
+                {entry.agent}
               </text>
-              <Show when={entry.title}>
-                <text fg={entry.running > 0 ? theme.text.feedback.success.base : theme.text.muted} wrapMode="none">
-                  {entry.model}
-                  {entry.running > 1 ? ` ×${entry.running}` : ""}
-                </text>
-              </Show>
+              <text fg={entry.running > 0 ? theme.text.feedback.success.base : theme.text.muted} wrapMode="none">
+                {entry.title || entry.model}
+                {entry.running > 1 ? ` ×${entry.running}` : ""}
+              </text>
             </box>
           )}
         </For>
