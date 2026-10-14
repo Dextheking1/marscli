@@ -698,7 +698,11 @@ function App() {
     // since the key-only switch), or it is flagged needs_auth (rejected key).
     const connection = marsai.connections[0]
     const status = connection?.status
-    if (marsai.connections.length === 0 || connection?.method === "oauth" || status?.status === "needs_auth") {
+    if (
+      marsai.connections.length === 0 ||
+      (connection?.type === "credential" && connection.method === "oauth") ||
+      status?.status === "needs_auth"
+    ) {
       loginPrompted = true
       dialog.replace(() => <DialogIntegration autoConnect />)
     }
