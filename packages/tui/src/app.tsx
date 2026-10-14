@@ -688,9 +688,13 @@ function App() {
   const connected = useConnected()
   let loginPrompted = false
   createEffect(() => {
-    if (loginPrompted || connected()) return
+    if (loginPrompted) return
     const integrations = data.location.integration.list()
-    if (!integrations?.some((integration) => integration.id === "marsai")) return
+    const marsai = integrations?.find((integration) => integration.id === "marsai")
+    if (!marsai) return
+    // Skip when a working credential exists; the auto-prompt covers both
+    // "no credential stored" and "stored credential flagged needs_auth".
+    if (connected() && marsai.connections[0]?.status?.status !== "needs_auth") return
     loginPrompted = true
     dialog.replace(() => <DialogIntegration autoConnect />)
   })

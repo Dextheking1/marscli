@@ -108,6 +108,13 @@ export function DialogIntegration(
     const integration = integrations()[0]
     if (!integration) return
     const methods = connectMethods(integration)
+    const status = integration.connections[0]?.status
+    // Forced re-auth (needs_auth) on a single-method integration opens the input directly
+    // — the connection list is only useful when there's a choice to make.
+    if (status?.status === "needs_auth" && methods.length === 1 && methods[0].type === "key") {
+      openMethod(integration, methods[0], location, dialog, props.onConnected)
+      return
+    }
     if (credentialConnections(integration).length) {
       manageConnections(integration, methods, location, dialog, props.onConnected)
       return
