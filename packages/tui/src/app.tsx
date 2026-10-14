@@ -688,7 +688,9 @@ function App() {
   const connected = useConnected()
   let loginPrompted = false
   createEffect(() => {
-    if (loginPrompted) return
+    // StartupLoading covers the screen until plugins.ready — hold the prompt
+    // until then or it opens behind the splash and never surfaces.
+    if (loginPrompted || !plugins.ready()) return
     const integrations = data.location.integration.list()
     const marsai = integrations?.find((integration) => integration.id === "marsai")
     if (!marsai) return
