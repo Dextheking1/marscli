@@ -694,11 +694,14 @@ function App() {
     const integrations = data.location.integration.list()
     const marsai = integrations?.find((integration) => integration.id === "marsai")
     if (!marsai) return
-    // Skip when a working credential exists; the auto-prompt covers both
-    // "no credential stored" and "stored credential flagged needs_auth".
-    if (connected() && marsai.connections[0]?.status?.status !== "needs_auth") return
-    loginPrompted = true
-    dialog.replace(() => <DialogIntegration autoConnect />)
+    // Prompt when no credential exists OR the stored one is flagged needs_auth
+    // (legacy OAuth / rejected key). A working connection returns early.
+    // needs_auth lands asynchronously after plugin load — check reactively.
+    const status = marsai.connections[0]?.status
+    if (marsai.connections.length === 0 || status?.status === "needs_auth") {
+      loginPrompted = true
+      dialog.replace(() => <DialogIntegration autoConnect />)
+    }
   })
   const appCommands = createMemo(() =>
     [
