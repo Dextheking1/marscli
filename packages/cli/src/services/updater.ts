@@ -71,6 +71,19 @@ function conciseDetail(input: string) {
   return `${detail}\n\nOutput shortened to the last 12 lines.`
 }
 
+// Package names the updater is allowed to self-update, mapped to the npm package
+// `upgrade()` installs. Platform binaries (`@mars_ai/marscli-windows-x64`) belong
+// to the launcher package npm manages, so they claim that name.
+const PACKAGE_PATTERN = /^@(?:opencode(?:-ai)?\/cli(?:-node)?|mars_ai\/marscli(?:-node)?)$/
+const PLATFORM_PATTERN = /^@mars_ai\/marscli-[a-z0-9]+-[a-z0-9]+(?:-baseline|-musl|-baseline-musl)*$/
+
+export function claimedPackage(name: string, directory: string, executable: string): string | undefined {
+  if (!executable.startsWith(path.resolve(directory) + path.sep)) return
+  if (PACKAGE_PATTERN.test(name)) return name
+  if (PLATFORM_PATTERN.test(name)) return "@mars_ai/marscli"
+  return
+}
+
 function errorDetail(cause: unknown): string {
   if (cause instanceof AppProcess.AppProcessError) {
     const stderr = conciseDetail(cause.stderr ?? "")
@@ -132,15 +145,24 @@ const make = Effect.gen(function* () {
   const flock = yield* EffectFlock.Service
   const installedVersion = yield* Ref.make(OPENCODE_VERSION)
   const executable = yield* fs.realPath(process.execPath).pipe(Effect.orElseSucceed(() => process.execPath))
+
   const installedPackage = yield* Effect.gen(function* () {
-    const directory = path.dirname(path.dirname(executable))
-    const manifest: { name: string; bin?: Record<string, string> } = yield* fs
-      .readFileString(path.join(directory, "package.json"))
-      .pipe(Effect.flatMap((text) => Effect.try(() => JSON.parse(text))))
-    // Source invocations run inside Bun or Node, which may themselves be npm packages.
-    if (!/^@(?:opencode(?:-ai)?\/cli(?:-node)?|mars_ai\/marscli)$/.test(manifest.name)) return
-    if (Object.values(manifest.bin ?? {}).some((bin) => path.resolve(directory, bin) === executable))
-      return manifest.name
+    // Launchers nest the native binary (npm launcher caches it under bin/<name>/,
+    // platform packages install it under their own bin/), so walk ancestors until
+    // a manifest claims the executable instead of assuming one fixed depth.
+    let directory = path.dirname(executable)
+    for (let depth = 0; depth < 6; depth++) {
+      const manifest = yield* fs.readFileString(path.join(directory, "package.json")).pipe(
+        Effect.flatMap((text) => Effect.try(() => JSON.parse(text) as { name: string })),
+        Effect.orElseSucceed(() => undefined as { name: string } | undefined),
+      )
+      const claimed = manifest && claimedPackage(manifest.name, directory, executable)
+      if (claimed) return claimed
+      const parent = path.dirname(directory)
+      if (parent === directory) return undefined
+      directory = parent
+    }
+    return undefined
   }).pipe(Effect.orElseSucceed(() => undefined))
   // "opencode" is Homebrew Core's formula; the others are published to anomalyco/tap.
   const installedFormula = ["opencode", "opencode-beta", "opencode-v2"].find((name) =>

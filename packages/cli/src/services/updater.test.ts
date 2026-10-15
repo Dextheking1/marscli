@@ -1,8 +1,37 @@
 import { describe, expect, test } from "bun:test"
+import path from "node:path"
 import { action } from "./updater-action"
-import { decodePolicy } from "./updater"
+import { claimedPackage, decodePolicy } from "./updater"
 
 describe("updater", () => {
+  test("claims the launcher package for a directly shipped binary", () => {
+    const dir = path.resolve("/repo/node_modules/@opencode/cli")
+    expect(claimedPackage("@opencode/cli", dir, path.join(dir, "bin", "opencode.exe"))).toBe("@opencode/cli")
+  })
+
+  test("claims the launcher package for a nested cached binary", () => {
+    const dir = path.resolve("/repo/node_modules/@mars_ai/marscli")
+    expect(claimedPackage("@mars_ai/marscli", dir, path.join(dir, "bin", "marscli", "mars.exe"))).toBe(
+      "@mars_ai/marscli",
+    )
+  })
+
+  test("maps platform binary packages to the launcher package", () => {
+    const dir = path.resolve("/repo/node_modules/@mars_ai/marscli-windows-x64")
+    expect(claimedPackage("@mars_ai/marscli-windows-x64", dir, path.join(dir, "bin", "mars.exe"))).toBe(
+      "@mars_ai/marscli",
+    )
+  })
+
+  test("rejects binaries outside the claiming package", () => {
+    const dir = path.resolve("/repo/node_modules/@opencode/cli")
+    expect(claimedPackage("@opencode/cli", dir, path.resolve("/repo/other/opencode.exe"))).toBeUndefined()
+  })
+
+  test("rejects unrelated package names", () => {
+    const dir = path.resolve("/repo/node_modules/9router")
+    expect(claimedPackage("9router", dir, path.join(dir, "bin", "cli.exe"))).toBeUndefined()
+  })
   test("reads update policy from JSONC", () => {
     expect(decodePolicy('{ // preference\n "update": "notify",\n}')).toBe("notify")
     expect(decodePolicy('{ "update": "disable" }')).toBe("disable")
