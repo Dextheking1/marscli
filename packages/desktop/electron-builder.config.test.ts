@@ -11,9 +11,9 @@ import type { Configuration } from "electron-builder"
 const { FileMatcher } = createRequire(import.meta.resolve("electron-builder"))("app-builder-lib/out/fileMatcher")
 
 const channels = [
-  { channel: "dev", appId: "ai.opencode.desktop.dev" },
-  { channel: "beta", appId: "ai.opencode.desktop.beta" },
-  { channel: "prod", appId: "ai.opencode.desktop" },
+  { channel: "dev", appId: "click.marsai.desktop.dev" },
+  { channel: "beta", appId: "click.marsai.desktop.beta" },
+  { channel: "prod", appId: "click.marsai.desktop" },
 ] as const
 
 async function load(channel: string) {
@@ -55,9 +55,9 @@ test.each(channels)("channel identity for $channel", async ({ channel, appId }) 
 
 test("legacy Linux launcher stays hidden", async () => {
   const desktop = await Bun.file(path.join(import.meta.dirname, "resources/linux/opencode-desktop.desktop")).text()
-  expect(desktop).toContain("Exec=/opt/OpenCode/ai.opencode.desktop %U")
-  expect(desktop).toContain("Icon=ai.opencode.desktop")
-  expect(desktop).toContain("StartupWMClass=ai.opencode.desktop")
+  expect(desktop).toContain("Exec=/opt/Mars Desktop/click.marsai.desktop %U")
+  expect(desktop).toContain("Icon=click.marsai.desktop")
+  expect(desktop).toContain("StartupWMClass=click.marsai.desktop")
   expect(desktop).toContain("NoDisplay=true")
 })
 

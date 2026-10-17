@@ -17,7 +17,7 @@ const signScript = path.join(rootDir, "script", "sign-windows.ps1")
 
 // The Electron 42 packaging update briefly installed Linux launchers/icons under
 // "opencode-desktop". Keep that hidden desktop entry around so existing GNOME/KDE
-// pins still resolve after the canonical app id changes back to ai.opencode.desktop.
+// pins still resolve after the canonical app id changes back to click.marsai.desktop.
 const legacyDesktopEntry = path.join(packageDir, "resources", "linux", "opencode-desktop.desktop")
 
 const legacyDesktopEntryFpm = `${legacyDesktopEntry}=/usr/share/applications/opencode-desktop.desktop`
@@ -62,20 +62,20 @@ const channel = (() => {
 })()
 
 const APP_IDS = {
-  dev: "ai.opencode.desktop.dev",
-  beta: "ai.opencode.desktop.beta",
-  prod: "ai.opencode.desktop",
+  dev: "click.marsai.desktop.dev",
+  beta: "click.marsai.desktop.beta",
+  prod: "click.marsai.desktop",
 } as const
 
 const getBase = (appId: string): Configuration => ({
-  artifactName: "opencode-desktop-${os}-${arch}.${ext}",
+  artifactName: "mars-desktop-${os}-${arch}.${ext}",
   directories: {
     output: "dist",
     buildResources: "resources",
   },
   // Linux launchers are .desktop files, so this is the desktop file name,
-  // not just the app id. For prod, app id "ai.opencode.desktop" becomes
-  // "ai.opencode.desktop.desktop".
+  // not just the app id. For prod, app id "click.marsai.desktop" becomes
+  // "click.marsai.desktop.desktop".
   // https://developer.gnome.org/documentation/guidelines/maintainer/integrating.html
   // https://www.electron.build/docs/linux/
   extraMetadata: {
@@ -138,8 +138,8 @@ const getBase = (appId: string): Configuration => ({
     target: ["dmg", "zip"],
   },
   protocols: {
-    name: "OpenCode",
-    schemes: ["opencode"],
+    name: "Mars Desktop",
+    schemes: ["marsai"],
   },
   win: {
     icon: `resources/icons/icon.ico`,
@@ -180,9 +180,9 @@ function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode Dev",
+        productName: "Mars Desktop Dev",
         deb: { fpm: [metainfoFpm(appId)] },
-        rpm: { packageName: "opencode-dev", fpm: [metainfoFpm(appId)] },
+        rpm: { packageName: "mars-desktop-dev", fpm: [metainfoFpm(appId)] },
       }
     }
 
@@ -190,15 +190,16 @@ function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode Beta",
-        protocols: { name: "OpenCode Beta", schemes: ["opencode"] },
+        productName: "Mars Desktop Beta",
+        protocols: { name: "Mars Desktop Beta", schemes: ["marsai"] },
         publish: {
-          provider: "generic",
-          url: "https://opencode.ai/update/api/beta/desktop/opencode/",
+          provider: "github",
+          owner: "anomalyco",
+          repo: "opencode-beta",
           channel: "latest",
         },
         deb: { fpm: [metainfoFpm(appId)] },
-        rpm: { packageName: "opencode-beta", fpm: [metainfoFpm(appId)] },
+        rpm: { packageName: "mars-desktop-beta", fpm: [metainfoFpm(appId)] },
       }
     }
 
@@ -206,15 +207,16 @@ function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode",
-        protocols: { name: "OpenCode", schemes: ["opencode"] },
+        productName: "Mars Desktop",
+        protocols: { name: "Mars Desktop", schemes: ["marsai"] },
         publish: {
-          provider: "generic",
-          url: "https://opencode.ai/update/api/latest/desktop/opencode/",
+          provider: "github",
+          owner: "anomalyco",
+          repo: "opencode",
           channel: "latest",
         },
         deb: { fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
-        rpm: { packageName: "opencode", fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
+        rpm: { packageName: "mars-desktop", fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
       }
     }
   }

@@ -1,13 +1,12 @@
 {
-  "name": "@opencode/desktop",
+  "name": "@marsai/desktop",
   "private": true,
   "version": "2.0.8",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://opencode.ai",
+  "homepage": "https://marsai.click",
   "author": {
-    "name": "OpenCode",
-    "email": "hello@opencode.ai"
+    "name": "MarsAI"
   },
   "scripts": {
     "typecheck": "tsgo -b",
