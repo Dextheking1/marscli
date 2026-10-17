@@ -37,13 +37,7 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 
   <url type="bugtracker">https://marsai.click</url>
   <url type="homepage">https://marsai.click</url>
-  <url type="vcs-browser">https://marsai.click</url>
-
-  <screenshots>
-    <screenshot type="default">
-      <image>https://raw.githubusercontent.com/anomalyco/opencode/b75d4d1c5ec449585d515c756fc81f080a157a9a/packages/web/src/assets/lander/screenshot.png</image>
-    </screenshot>
-  </screenshots>
+  <url type="vcs-browser">https://github.com/localhost8083/marsDesktop</url>
 </component>
 `
 
