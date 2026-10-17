@@ -722,7 +722,7 @@ export function AssistantReasoningContent(props: {
   // codes inside the reasoning stream; strip both so the collapsed/expanded view shows
   // only the model's thoughts, never raw markup or control bytes.
   const display = createMemo(() =>
-    props.content.text.replace(/<\/?think>/g, "").replace(/?\[[0-9;]*[A-Za-z]/g, ""),
+    props.content.text.replace(/<\/?think>/g, "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ""),
   )
   const blank = createMemo(() => !display().trim())
   const cleanHeading = createMemo(() => (heading() ?? "").replace(/<\/?think>/g, ""))
