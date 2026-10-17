@@ -1,0 +1,252 @@
+name: release
+run-name: "mars-desktop ${{ inputs.channel || 'prod' }} ${{ inputs.version || github.ref_name }}"
+
+# Mars Desktop release pipeline.
+#
+# Mirrors the upstream opencode publish flow (matrix build -> optional sign -> package ->
+# publish installers + latest*.yml), but publishes to GitHub Releases on this repository
+# instead of the opencode.ai update service, which is hard-coded to infra we do not own.
+#
+# The bundled opencode CLI is not rebuilt here: each OS builder downloads the matching
+# published @opencode/cli-* binary for its target (see packages/desktop/scripts/prebuild.ts).
+#
+# Signing is optional and gated on secrets being present:
+#   - macOS codesign/notarize  : APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_API_KEY_PATH,
+#                                APPLE_API_KEY, APPLE_API_ISSUER
+#   - Windows Authenticode     : AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
+#                                AZURE_TRUSTED_SIGNING_*  (Trusted Signing via script/sign-windows.ps1)
+# Without them the installers ship unsigned (a warning is emitted) so the pipeline still runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel (selects app id, product name, update feed)"
+        required: true
+        default: prod
+        type: choice
+        options:
+          - prod
+          - beta
+          - dev
+      version:
+        description: "Version to stamp the build (e.g. 2.0.8). Defaults to package.json version."
+        required: false
+        type: string
+      publish:
+        description: "Upload installers + latest*.yml to a GitHub Release"
+        required: false
+        default: true
+        type: boolean
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mars-desktop-release-${{ inputs.channel || 'prod' }}
+  cancel-in-progress: false
+
+env:
+  OPENCODE_CHANNEL: ${{ inputs.channel || 'prod' }}
+  OPENCODE_VERSION: ${{ inputs.version }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      channel: ${{ steps.version.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: version
+        shell: bash
+        run: |
+          CHANNEL="${{ inputs.channel || 'prod' }}"
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION=$(node -p "require('./packages/desktop/package.json').version")
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version ${VERSION} (channel ${CHANNEL})"
+
+  build-electron:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            platform_flag: --mac --arm64
+            bun_install_flags: --os=darwin --cpu=arm64
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            platform_flag: --mac --x64
+            bun_install_flags: --os=darwin --cpu=x64
+          - host: windows-latest
+            target: aarch64-pc-windows-msvc
+            platform_flag: --win --arm64
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform_flag: --win
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform_flag: --linux
+    runs-on: ${{ matrix.settings.host }}
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            bun install --frozen-lockfile --linker hoisted ${{ matrix.settings.bun_install_flags }}
+          else
+            bun install --frozen-lockfile ${{ matrix.settings.bun_install_flags }}
+          fi
+
+      - name: Install rpm tooling (linux only)
+        if: contains(matrix.settings.host, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+
+      - name: Detect signing availability (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        id: sign-win
+        run: |
+          $ready = -not [string]::IsNullOrEmpty("${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}")
+          Write-Output "available=$ready" >> $env:GITHUB_OUTPUT
+          if (-not $ready) { Write-Warning "Azure Trusted Signing secrets not configured; installer will ship unsigned." }
+
+      - name: Detect signing availability (macOS)
+        if: runner.os == 'macOS'
+        id: sign-mac
+        run: |
+          if [ -n "${{ secrets.APPLE_CERTIFICATE }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Apple signing secrets not configured; app will ship unsigned."
+          fi
+
+      - name: Azure login (Windows signing)
+        if: runner.os == 'Windows' && steps.sign-win.outputs.available == 'true'
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Import Apple codesign certs
+        if: runner.os == 'macOS' && steps.sign-mac.outputs.available == 'true'
+        uses: apple-actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93 # v2.0.0
+        with:
+          keychain: build
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Setup Apple API key
+        if: runner.os == 'macOS' && steps.sign-mac.outputs.available == 'true'
+        run: echo "${{ secrets.APPLE_API_KEY_PATH }}" > "$RUNNER_TEMP/apple-api-key.p8"
+
+      - name: Prepare (icons, metainfo, CLI)
+        working-directory: packages/desktop
+        run: bun ./scripts/prepare.ts
+        env:
+          OPENCODE_VERSION: ${{ needs.version.outputs.version }}
+          OPENCODE_CHANNEL: ${{ needs.version.outputs.channel }}
+          OPENCODE_CLI_TARGET: ${{ matrix.settings.target }}
+
+      - name: Build
+        working-directory: packages/desktop
+        run: bun run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          OPENCODE_VERSION: ${{ needs.version.outputs.version }}
+          OPENCODE_CHANNEL: ${{ needs.version.outputs.channel }}
+          OPENCODE_CLI_TARGET: ${{ matrix.settings.target }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.WEB_SENTRY_PROJECT }}
+          SENTRY_RELEASE: desktop@${{ needs.version.outputs.version }}
+          VITE_SENTRY_DSN: ${{ vars.WEB_SENTRY_DSN }}
+          VITE_SENTRY_ENVIRONMENT: ${{ needs.version.outputs.channel == 'prod' && 'production' || needs.version.outputs.channel }}
+          VITE_SENTRY_RELEASE: desktop@${{ needs.version.outputs.version }}
+
+      - name: Package (publish to GitHub Release)
+        if: ${{ inputs.publish || github.event_name == 'push' }}
+        working-directory: packages/desktop
+        timeout-minutes: 60
+        run: npx electron-builder ${{ matrix.settings.platform_flag }} --publish always --config electron-builder.config.ts
+        env:
+          OPENCODE_CHANNEL: ${{ needs.version.outputs.channel }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_KEYCHAIN: build.keychain
+          APPLE_API_KEY: ${{ runner.temp }}/apple-api-key.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          # Skip notarization when the Apple API key is absent.
+          SKIP_NOTARIZE: ${{ steps.sign-mac.outputs.available != 'true' && '1' || '' }}
+
+      - name: Package (no publish)
+        if: ${{ !(inputs.publish || github.event_name == 'push') }}
+        working-directory: packages/desktop
+        timeout-minutes: 60
+        run: npx electron-builder ${{ matrix.settings.platform_flag }} --publish never --config electron-builder.config.ts
+        env:
+          OPENCODE_CHANNEL: ${{ needs.version.outputs.channel }}
+          CSC_KEYCHAIN: build.keychain
+          APPLE_API_KEY: ${{ runner.temp }}/apple-api-key.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+      - name: Verify Windows signatures
+        if: runner.os == 'Windows' && steps.sign-win.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          $files = @()
+          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop\dist\*.exe" | Select-Object -ExpandProperty FullName
+          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop\dist\*unpacked\*.exe" | Select-Object -ExpandProperty FullName
+          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop\dist\*unpacked\resources\opencode-cli.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+          foreach ($file in $files | Select-Object -Unique) {
+            $sig = Get-AuthenticodeSignature $file
+            if ($sig.Status -ne "Valid") { throw "Invalid signature for ${file}: $($sig.Status)" }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mars-desktop-${{ matrix.settings.target }}
+          path: packages/desktop/dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: latest-yml-${{ matrix.settings.target }}
+          path: packages/desktop/dist/latest*.yml
+          if-no-files-found: ignore
