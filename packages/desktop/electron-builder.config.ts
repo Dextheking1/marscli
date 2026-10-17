@@ -73,6 +73,14 @@ const getBase = (appId: string): Configuration => ({
     output: "dist",
     buildResources: "resources",
   },
+  // Every channel publishes installers + latest*.yml to the marsDesktop GitHub Releases feed;
+  // electron-updater reads latest.yml from there. Dev/beta get their own app ids but share the repo.
+  publish: {
+    provider: "github",
+    owner: "localhost8083",
+    repo: "marsDesktop",
+    channel: "latest",
+  },
   // Linux launchers are .desktop files, so this is the desktop file name,
   // not just the app id. For prod, app id "click.marsai.desktop" becomes
   // "click.marsai.desktop.desktop".
@@ -193,12 +201,6 @@ function getConfig() {
         appId,
         productName: "Mars Desktop Beta",
         protocols: { name: "Mars Desktop Beta", schemes: ["marsai"] },
-        publish: {
-          provider: "github",
-          owner: "localhost8083",
-          repo: "marsDesktop",
-          channel: "latest",
-        },
         deb: { fpm: [metainfoFpm(appId)] },
         rpm: { packageName: "mars-desktop-beta", fpm: [metainfoFpm(appId)] },
       }
@@ -210,12 +212,6 @@ function getConfig() {
         appId,
         productName: "Mars Desktop",
         protocols: { name: "Mars Desktop", schemes: ["marsai"] },
-        publish: {
-          provider: "github",
-          owner: "localhost8083",
-          repo: "marsDesktop",
-          channel: "latest",
-        },
         deb: { fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
         rpm: { packageName: "mars-desktop", fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
       }
