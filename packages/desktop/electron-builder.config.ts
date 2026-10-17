@@ -134,7 +134,8 @@ const getBase = (appId: string): Configuration => ({
       const { sign } = await import("app-builder-lib/out/codeSign/macCodeSign")
       await sign(macSignOptions(options))
     },
-    notarize: true,
+    // SKIP_NOTARIZE=1 lets unsigned / dev builds package without Apple notarization credentials.
+    notarize: process.env.SKIP_NOTARIZE !== "1" && process.env.SKIP_NOTARIZE !== "true",
     target: ["dmg", "zip"],
   },
   protocols: {
@@ -194,8 +195,8 @@ function getConfig() {
         protocols: { name: "Mars Desktop Beta", schemes: ["marsai"] },
         publish: {
           provider: "github",
-          owner: "anomalyco",
-          repo: "opencode-beta",
+          owner: "localhost8083",
+          repo: "marsDesktop",
           channel: "latest",
         },
         deb: { fpm: [metainfoFpm(appId)] },
@@ -211,8 +212,8 @@ function getConfig() {
         protocols: { name: "Mars Desktop", schemes: ["marsai"] },
         publish: {
           provider: "github",
-          owner: "anomalyco",
-          repo: "opencode",
+          owner: "localhost8083",
+          repo: "marsDesktop",
           channel: "latest",
         },
         deb: { fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
