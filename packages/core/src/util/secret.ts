@@ -7,14 +7,30 @@ import { Global } from "@opencode/util/global"
 
 const PREFIX = "enc:v1:"
 
+function readKey(keyFile: string) {
+  const raw = readFileSync(keyFile, "utf8").trim()
+  // Fail closed on a damaged key file. Hashing empty or partial content would derive a
+  // key from a publicly known string (sha256 of "" is a constant), so a truncated write
+  // must never be accepted as key material.
+  if (!/^[0-9a-f]{64}$/i.test(raw)) throw new Error(`Invalid credential key file: ${keyFile}`)
+  return createHash("sha256").update(raw).digest()
+}
+
 function key() {
   const keyFile = path.join(Global.Path.data, "secret.key")
   if (!existsSync(keyFile)) {
     mkdirSync(path.dirname(keyFile), { recursive: true, mode: 0o700 })
-    writeFileSync(keyFile, randomBytes(32).toString("hex"), { mode: 0o600 })
+    try {
+      // "wx" fails instead of overwriting when a concurrent first run won the race.
+      // The loser has to encrypt with the winner's key; replacing it would strand
+      // every credential the winner already stored.
+      writeFileSync(keyFile, randomBytes(32).toString("hex"), { mode: 0o600, flag: "wx" })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+    }
     if (process.platform !== "win32") chmodSync(keyFile, 0o600)
   }
-  return createHash("sha256").update(readFileSync(keyFile, "utf8").trim()).digest()
+  return readKey(keyFile)
 }
 
 export function encrypt(plain: string) {
