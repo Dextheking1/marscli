@@ -501,9 +501,24 @@ const layer = Layer.effect(
           )).filter((item): item is RelativePath => item !== undefined)
         : []
       const skip = new Set(skipped)
-      const added = candidates.filter((item) => !excluded.has(item) && !skip.has(item))
+      // Git cannot record non-regular files (sockets, FIFOs, devices) and update-index aborts the
+      // whole batch on one, so they never reach it. A stat failure keeps the path: a deleted file
+      // still has to be recorded as removed by the same call.
+      const nonRegular = new Set(
+        (yield* Effect.forEach(
+          candidates.filter((item) => !excluded.has(item)),
+          (item) =>
+            fs.stat(path.join(input.repository.worktree, item)).pipe(
+              Effect.map((info) => (info.type !== "File" && info.type !== "Directory" ? item : undefined)),
+              Effect.orElseSucceed(() => undefined),
+            ),
+          { concurrency: 8 },
+        )).filter((item): item is RelativePath => item !== undefined),
+      )
+      const added = candidates.filter((item) => !excluded.has(item) && !skip.has(item) && !nonRegular.has(item))
       // Untracked paths are not in the index, so only tracked paths that are now ignored need removing.
-      const removed = input.changes.tracked.filter((item) => excluded.has(item))
+      // A tracked path replaced by a non-regular file reads as removed the same way.
+      const removed = input.changes.tracked.filter((item) => excluded.has(item) || nonRegular.has(item))
       // update-index takes literal paths, so large lists avoid add's quadratic pathspec matching.
       if (removed.length)
         yield* repositoryOperation("refresh", input.repository, ["update-index", "--force-remove", "-z", "--stdin"], {

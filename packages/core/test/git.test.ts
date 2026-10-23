@@ -347,6 +347,43 @@ describe("Git trees", () => {
       expect(yield* read(path.join(root.path, "outside.txt"))).toBe("changed outside\n")
     }),
   )
+
+  it.live("capture skips non-regular files instead of failing the whole capture", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(async () => {
+        await initRepo(root.path)
+        await Bun.write(path.join(root.path, "tracked.txt"), "one\n")
+        await $`git add . && git commit -q -m initial`.cwd(root.path).quiet()
+      })
+      const git = yield* Git.Service
+      const repository = yield* git.repo.discover(AbsolutePath.make(root.path))
+      if (!repository) throw new Error("Repository not found")
+      const before = yield* git.tree.capture({ repository, scopes: [RelativePath.make(".")] })
+      yield* Effect.promise(async () => {
+        // A stale unix socket left by another tool, plus a FIFO: neither can be recorded by Git.
+        await $`python3 -c "import socket; socket.socket(socket.AF_UNIX).bind('${path.join(root.path, "app.sock")}')"`.quiet()
+        await $`mkfifo ${path.join(root.path, "pipe.fifo")}`.quiet()
+        await Bun.write(path.join(root.path, "new.txt"), "new\n")
+      })
+      const after = yield* git.tree.capture({ repository, scopes: [RelativePath.make(".")] })
+      expect(yield* git.tree.files({ repository, from: before, to: after })).toEqual([RelativePath.make("new.txt")])
+
+      // A tracked file replaced by a socket reads as removed, and capture still succeeds.
+      yield* Effect.promise(async () => {
+        await fs.rm(path.join(root.path, "tracked.txt"))
+        await $`python3 -c "import socket; socket.socket(socket.AF_UNIX).bind('${path.join(root.path, "tracked.txt")}')"`.quiet()
+      })
+      const replaced = yield* git.tree.capture({ repository, scopes: [RelativePath.make(".")] })
+      expect(
+        (yield* git.tree.diff({ repository, from: after, to: replaced })).map((file) => [file.file, file.status]),
+      ).toEqual([[RelativePath.make("tracked.txt"), "deleted"]])
+      expect(yield* git.tree.capture({ repository, scopes: [RelativePath.make(".")] })).toBe(replaced)
+    }),
+  )
 })
 
 describe("Git objects", () => {
