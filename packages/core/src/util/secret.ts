@@ -1,7 +1,7 @@
 export * as Secret from "./secret.js"
 
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from "node:crypto"
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs"
+import { chmodSync, closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import path from "path"
 import { Global } from "@opencode/util/global"
 
@@ -16,20 +16,39 @@ function readKey(keyFile: string) {
   return createHash("sha256").update(raw).digest()
 }
 
+function createKey(keyFile: string) {
+  // Write the finished key to a temp file in the same directory, fsync it, then publish
+  // it with link(). link() is atomic and fails with EEXIST instead of replacing an
+  // existing key, so a file visible at the real path is always complete, and the loser
+  // of a first-run race reads the winner's key instead of stranding the credentials
+  // it already stored under its own.
+  const tmpFile = `${keyFile}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`
+  const fd = openSync(tmpFile, "wx", 0o600)
+  try {
+    writeFileSync(fd, randomBytes(32).toString("hex"))
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+  try {
+    linkSync(tmpFile, keyFile)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+  } finally {
+    unlinkSync(tmpFile)
+  }
+}
+
 function key() {
   const keyFile = path.join(Global.Path.data, "secret.key")
-  if (!existsSync(keyFile)) {
-    mkdirSync(path.dirname(keyFile), { recursive: true, mode: 0o700 })
-    try {
-      // "wx" fails instead of overwriting when a concurrent first run won the race.
-      // The loser has to encrypt with the winner's key; replacing it would strand
-      // every credential the winner already stored.
-      writeFileSync(keyFile, randomBytes(32).toString("hex"), { mode: 0o600, flag: "wx" })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
-    }
-    if (process.platform !== "win32") chmodSync(keyFile, 0o600)
+  try {
+    return readKey(keyFile)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
   }
+  mkdirSync(path.dirname(keyFile), { recursive: true, mode: 0o700 })
+  createKey(keyFile)
+  if (process.platform !== "win32") chmodSync(keyFile, 0o600)
   return readKey(keyFile)
 }
 
