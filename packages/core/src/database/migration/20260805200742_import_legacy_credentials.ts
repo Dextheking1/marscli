@@ -80,7 +80,17 @@ export function importLegacyCredentials(tx: Parameters<DatabaseMigration.Migrati
 
       const credential =
         value.type === "api"
-          ? Credential.Key.make({ type: "key", key: value.key, metadata: value.metadata })
+          ? Credential.Key.make({
+              type: "key",
+              key: value.key,
+              // A legacy `server` value is file-controlled text and no first-party
+              // writer sets one on a key credential. Carrying it through would let
+              // an imported file point the stored key at an arbitrary host, so drop
+              // it here: imported keys use the configured default server.
+              metadata: value.metadata
+                ? Object.fromEntries(Object.entries(value.metadata).filter(([name]) => name !== "server"))
+                : undefined,
+            })
           : value.type === "wellknown"
             ? Credential.Key.make({ type: "key", key: value.token })
             : Credential.OAuth.make({
