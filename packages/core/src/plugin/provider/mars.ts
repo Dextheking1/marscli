@@ -9,7 +9,22 @@ import { Credential } from "../../credential.js"
 import { Integration } from "../../integration.js"
 import { Provider } from "../../provider.js"
 
-const defaultServer = (process.env.MARSAI_URL ?? "https://marsai.click").replace(/\/+$/, "").replace(/\/v1$/i, "")
+const fallbackServer = "https://marsai.click"
+
+function normalizeServer(raw: string) {
+  try {
+    const url = new URL(raw)
+    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "[::1]"
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return undefined
+    return `${url.origin}${url.pathname.replace(/\/+$/, "").replace(/\/v1$/i, "")}`
+  } catch {
+    return undefined
+  }
+}
+
+// MARSAI_URL gets the same check as a credential server. Without it the
+// fallback itself could point the key at a remote host over plaintext http.
+const defaultServer = (process.env.MARSAI_URL ? normalizeServer(process.env.MARSAI_URL) : undefined) ?? fallbackServer
 const integrationID = Integration.ID.make("marsai")
 const providerID = Provider.ID.make("marsai")
 const ModelsResponse = Schema.Struct({
@@ -29,14 +44,7 @@ const ModelsResponse = Schema.Struct({
 function serverUrl(value: Credential.Key) {
   const raw = value.metadata?.server
   if (typeof raw !== "string") return defaultServer
-  try {
-    const url = new URL(raw)
-    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "[::1]"
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return defaultServer
-    return `${url.origin}${url.pathname.replace(/\/+$/, "").replace(/\/v1$/i, "")}`
-  } catch {
-    return defaultServer
-  }
+  return normalizeServer(raw) ?? defaultServer
 }
 
 function modelsFor(http: HttpClient.HttpClient, value: Credential.Key) {
