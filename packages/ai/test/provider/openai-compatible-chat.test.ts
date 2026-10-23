@@ -274,6 +274,33 @@ describe("OpenAI-compatible Chat route", () => {
     }),
   )
 
+  it.effect("keeps GLM-style tool call IDs distinct for mistral-family models", () =>
+    Effect.gen(function* () {
+      const first = "chatcmpl-tool-99557ad68a6e6efc"
+      const second = "chatcmpl-tool-1234567890abcdef"
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model: OpenAICompatibleChat.route
+            .with({ provider: "custom", endpoint: { baseURL: "https://api.custom.test/v1" } })
+            .model({ id: "mistral/zai-glm-5-3-flash" }),
+          messages: [
+            Message.assistant(
+              [first, second].map((id) => ToolCallPart.make({ id, name: "lookup", input: {} })),
+            ),
+            Message.tool({ id: first, name: "lookup", result: { type: "content", value: [] } }),
+            Message.tool({ id: second, name: "lookup", result: { type: "content", value: [] } }),
+          ],
+        }),
+      )
+      expect(prepared.body.messages).toMatchObject([
+        { role: "assistant", tool_calls: [{ id: MistralToolID.hash(first) }, { id: MistralToolID.hash(second) }] },
+        { role: "tool", tool_call_id: MistralToolID.hash(first) },
+        { role: "tool", tool_call_id: MistralToolID.hash(second) },
+      ])
+      expect(MistralToolID.hash(first)).not.toBe(MistralToolID.hash(second))
+    }),
+  )
+
   it.effect("bridges tool results for Mistral-family models and honors compatibility overrides", () =>
     Effect.gen(function* () {
       const cases = [
